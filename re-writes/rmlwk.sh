@@ -14,11 +14,14 @@ hostsFile="$moduleDirectory/system/etc/hosts"
 systemHosts="/system/etc/hosts"
 tmpHosts="/data/local/tmp/hosts"
 version="$(grep '^version=' "$moduleDirectory/module.prop" | cut -d= -f2-)"
-thisInstanceLogFile="$persistantDirectory/logs/Re-Malwack_$(date +%Y-%m-%d_%H%M%S).log"
+# redirect error messages to /dev/stderr for logging when the action.sh is executed.
+[ -n "$isRanByActions" ] && thisInstanceLogFile="/dev/stderr" || thisInstanceLogFile="$persistantDirectory/logs/Re-Malwack_$(date +%Y-%m-%d_%H%M%S).log"
 thisSessionLock="$persistantDirectory/lock"
+prodOEM=$(tolower "$(getprop ro.product.brand)")
 
 # pre-setup:
-mkdir -p $persistantDirectory/{logs,counts,cache/whitelist}
+mkdir -p $persistantDirectory/{logs,counts,cache/whitelist,cache/trackers}
+touch "$persistantDirectory/"{blacklist.txt,sources.txt,whitelist.txt}
 PREVPATH="${PATH}"
 PATH="/data/adb/ap/bin:/data/adb/ksu/bin:/data/adb/magisk:/data/data/com.termux/files/usr/bin:$PREVPATH"
 
@@ -56,11 +59,40 @@ function rmlwkBanner() {
     esac
     updateStatus
 }
+
+function help() {
+    rmlwkBanner
+    logShit "help(): Arguments given by user: $args"
+    consoleMessage "- Usage: $(basename "$0") [--OPTION] [SUB-OPTION]"
+    consoleMessage ""
+    consoleMessage "  Normal Options:"
+    consoleMessage "    -u,  --update-hosts                     Update the adblock hosts."
+    consoleMessage "    -a,  --auto-update <enable|disable>     Enable or disable automatic host updates."
+    consoleMessage "    -r,  --reset                            Restore the original hosts file."
+    consoleMessage "    -as, --adblock-switch                   Toggle adblock protections on/off."
+    consoleMessage "    -w,  --whitelist <add|remove> <domain>  Add or remove a domain/pattern from the whitelist."
+    consoleMessage "    -b,  --blocklist <add|remove> <domain>  Add or remove a domain from the blocklist."
+    consoleMessage ""
+    consoleMessage "  Block Options:"
+    consoleMessage "    Example: --block=gambling, -bg <disable>"
+    consoleMessage "             Pass \"disable\" to unblock."
+    consoleMessage ""
+    consoleMessage "    Available block categories:"
+    consoleMessage "      gambling, fakenews, social, porn & trackers"
+    consoleMessage ""
+    consoleMessage "  Advanced Options:"
+    consoleMessage "    -c, --custom-source <add|remove> <domain>   Add or remove a custom hosts source."
+    consoleMessage ""
+    consoleMessage "\033[0;31m Example usage: su -c rmlwk --update-hosts\033[0m"
+}
 # PURE FREEAKING HEADACHEEEEEE
 
 # helper functions:
 function parseShortAndLongBlockArgs() {
     case "$1" in
+        "t|trackers")
+            echo trackers
+        ;;
         "s|social")
             echo social
         ;;
@@ -266,6 +298,72 @@ function blockContent() {
     fi
 }
 
+function blockTrackers() {
+    status="$1"
+    cacheHosts="${persistantDirectory}/cache/trackers/hosts"
+    mkdir -p $(dirname "$cacheHosts")
+    if [ "$status" = "disable" ] || [ "$status" = "0" ]; then
+        [ "$block_trackers" = 0 ] && abortInstance "- Tracker blocking is already disabled." "blockTrackers: User tried to unblock trackers while it's already unblocked."
+        if ! ls "${cacheHosts}"* >/dev/null 2&1; then
+            case "${prodOEM}" in
+                xiaomi|poco|redmi|oppo|realme)
+                    :
+                ;;
+                *)
+                    abortInstance "Your ${prodOEM} is not found in the oem trackers blocklists, aborting this instance." "blockTrackers(): User's ${prodOEM} is not supported for blocking OEM trackers."
+                ;;
+            esac
+            consoleMessage "- No cached trackers blocklist file found for your $prodOEM, re-downloading before removal." "blockTrackers(): Re-downloading tracker hosts.."
+            fetch "${cacheHosts}1" "https://raw.githubusercontent.com/r-a-y/mobile-hosts/refs/heads/master/AdguardTracking.txt"
+            hostsFilterer "${cacheHosts}1"
+            fetch "${cacheHosts}2" https://raw.githubusercontent.com/hagezi/dns-blocklists/main/hosts/native.$(
+                case "${prodOEM}" in
+                    xiaomi|poco|redmi)
+                        echo "xiaomi"
+                    ;;
+                    oppo|realme)
+                        echo "oppo-realme"
+                    ;;
+                    *)
+                        echo "${prodOEM}"
+                    ;;
+                esac
+            ).txt
+            hostsFilterer "${cacheHosts}2"
+            stageBlocklistFiles "trackers"
+            installHosts "trackers"
+        fi
+        consoleMessage "  Disabling trackers block for $prodOEM device."
+        removeHosts
+        sed -i "s/^block_trackers=.*/block_trackers=0/" "$persistantDirectory/config.sh"
+        consoleMessage "- Trackers block has been disabled" "blockTrackers(): User's request for blocking the trackers has been disabled."
+    else
+        [ "$block_trackers" = 1 ] && abortInstance "- Tracker blocking is already enabled." "blockTrackers: User tried to block trackers while it's already blocked."
+        if ! ls "${cacheHosts}"* >/dev/null 2&1; then
+            consoleMessage "- Fetching trackers block hosts for $prodOEM" "blockTrackers(): Fetching trackers block hosts for $prodOEM"
+            fetch "${cacheHosts}1" https://raw.githubusercontent.com/hagezi/dns-blocklists/main/hosts/native.$(
+                case "${prodOEM}" in
+                    xiaomi|poco|redmi)
+                        echo "xiaomi"
+                    ;;
+                    oppo|realme)
+                        echo "oppo-realme"
+                    ;;
+                    *)
+                        echo "${prodOEM}"
+                    ;;
+                esac
+            ).txt
+            hostsFilterer "${cacheHosts}1"
+            consoleMessage "  Enabling trackers block for $prodOEM device." "blockTrackers(): Enabling trackers block for $prodOEM device."
+            stageBlocklistFiles "trackers"
+            installHosts "trackers"
+            sed -i "s/^block_trackers=.*/block_trackers=1/" "$persistantDirectory/config.sh"
+            consoleMessage "- Trackers block has been enabled" "blockTrackers(): User's request for blocking the trackers has been enabled."
+        fi
+    fi
+}
+
 function updateStatus() {
     local lastMod=$(stat -c '%y' "$hostsFile" 2>/dev/null | cut -d'.' -f1)
     
@@ -405,9 +503,9 @@ echo "$@" | grep -q "--quiet" && throwOneToTwo=true
 [ -z "$MAGISKTMP" ] && [ "$throwOneToTwo" = "false" ] && rmlwkBanner;
 
 # put arguments in a variable (useful in the near future.)
-args="$(tolower "$1")"
+args="$(tolower "$@")"
 
-case "${args}" in
+case "$(echo "${args}" | awk '{print $1}')" in
     "--adblock-switch|-as")
         pauseBlocker
     ;;
@@ -442,7 +540,7 @@ case "${args}" in
         status="$2"
         blockType="$(parseShortAndLongBlockArgs "${clean}")"
         case "$clean" in
-            porn|gambling|fakenews|social|s|f|g|p)
+            porn|gambling|fakenews|social|trackers|t|s|f|g|p)
                 :
             ;;
             *)
@@ -452,22 +550,26 @@ case "${args}" in
         esac
         consoleMessage "- Trying to run requested $blockType block action to get it $(if [ "$status" == "disable" ] || [ "$status" == "0" ]; then echo disabled; else echo enabled; fi)"
         logShit "main: User requested for $blockType block type to get $(if [ "$status" == "disable" ] || [ "$status" == "0" ]; then echo disabled; else echo enabled; fi)"
-        eval "block_toggle\"\$block_${blockType}\""
-        if [ "$status" == "disable" ] || [ "$status" == "0" ]; then
-            if [ "$block_toggle" = 0 ]; then
-                abortInstance "- ${blockType} is already blocked." "main: ${blockType} block is already disabled."
-            else 
-                consoleMessage "- Disabling ${blockType} ads block type..." "main: ${blockType} block type disable has been initialized."
-                blockContent "${blockType}" 0
-                consoleMessage "- Unblocked ${blockType} sites successfully :/" "main: unblocked ${blockType} sites."
-            fi
+        if [ "$blockType" = "trackers" ]; then
+            blockTrackers
         else
-            if [ "$block_toggle" = 1 ]; then
-                abortInstance "- ${blockType} is already unblocked." "main: ${blockType} block is already enabled."
-            else 
-                consoleMessage "- Enabling ${blockType} ads block type..." "main: ${blockType} block type enable has been initialized."
-                blockContent "${blockType}" 1
-                consoleMessage "- Blocked ${blockType} sites successfully :/" "main: blocked ${blockType} sites."
+            eval "block_toggle\"\$block_${blockType}\""
+            if [ "$status" == "disable" ] || [ "$status" == "0" ]; then
+                if [ "$block_toggle" = 0 ]; then
+                    abortInstance "- ${blockType} is already blocked." "main: ${blockType} block is already disabled."
+                else 
+                    consoleMessage "- Disabling ${blockType} ads block type..." "main: ${blockType} block type disable has been initialized."
+                    blockContent "${blockType}" 0
+                    consoleMessage "- Unblocked ${blockType} sites successfully :/" "main: unblocked ${blockType} sites."
+                fi
+            else
+                if [ "$block_toggle" = 1 ]; then
+                    abortInstance "- ${blockType} is already unblocked." "main: ${blockType} block is already enabled."
+                else 
+                    consoleMessage "- Enabling ${blockType} ads block type..." "main: ${blockType} block type enable has been initialized."
+                    blockContent "${blockType}" 1
+                    consoleMessage "- Blocked ${blockType} sites successfully :/" "main: blocked ${blockType} sites."
+                fi
             fi
         fi
         refreshCounts
@@ -526,7 +628,6 @@ case "${args}" in
         else
             domRe="^${escBase}$"
         fi
-        touch "$persistantDirectory/whitelist.txt"
         if [ "$action" = "add" ]; then2
             case "$rawInput" in
                 \*\.*) # Subdomain: *.domain.com
@@ -637,7 +738,6 @@ case "${args}" in
             fi
             # Ensure the domain is not already whitelisted
             grep -Fxq "$host" "$persistantDirectory/whitelist.txt" && abortInstance "- Cannot blocklist $rawInput, it already exists in whitelist." "main: User tried to blocklist a domain that exists in whitelist."
-            touch "$persistantDirectory/blacklist.txt"
             if [ "$option" = "add" ]; then
                 # Add to hosts file if not already present
                 grep -qE "^0\.0\.0\.0[[:space:]]+$domain\$" "$hostsFile" && abortInstance "- $domain is already blocked" "main: User tried to block a domain that is already blocked."
@@ -670,6 +770,7 @@ case "${args}" in
         fi
     ;;
     --custom-source|-c)
+        consoleMessage "- Trying to run custom sources actions on given domain.." "main: User requested for a custom source to be managed."
         option="$2"
         domain="$3"
         if [ -z "$option" ]; then
@@ -689,13 +790,11 @@ case "${args}" in
             consoleMessage "- Invalid domain: $domain"
             abortInstance "   Example valid domain: example.com, https://example.com or https://example.com/hosts.txt" "main: User gave an invalid domain in the custom sources action."
         fi
-        touch "$persistantDirectory/sources.txt"
         if [ "$option" = "add" ]; then
             grep -qx "$domain" "$persistantDirectory/sources.txt" && abortInstance "- $domain is already in sources." "main: User gave an domain that is already in the sources."
             #uhrmm
             echo "$domain" >> "$persistantDirectory/sources.txt"
             consoleMessage "- Added $domain to the sources." "main: Added user requested domain to the sources."
-            fi
         else
             if grep -qx "$domain" "$persistantDirectory/sources.txt"; then
                 sed -i "/^$(printf '%s' "$domain" | sed 's/[]\/$*.^|[]/\\&/g')$/d" "$persistantDirectory/sources.txt"
@@ -704,5 +803,70 @@ case "${args}" in
                 consoleMessage "- $domain is not found in the sources." "main: Failed to remove user requested domain, maybe it was not even found? Who knows right?"
             fi
         fi
+    ;;
+    --update-hosts|-u)
+        consoleMessage "- Trying to hosts updater action.." "main: User requested for a hosts update."
+        isBlockerPaused && abortInstance "- Adblocker is paused and it cannot be reset. Please resume it before running this action." "main: User tried to update hosts white the blocker is paused."
+        combinedFile="${tmpHosts}_all"
+        > "$combinedFile"
+
+        # download + normalize base hosts
+        consoleMessage "  Fetching base hosts..."
+        counter=0
+        for host in $(grep -Ev '^#|^$' "$persistantDirectory/sources.txt" | sort -u); do
+            fetch "${tmpHosts}${counter}" "$host"
+            counter=$((counter + 1))
+        done
+        
+        # Process in parallel
+        jobLimit=4
+        jobCount=0
+        for i in $(seq 1 $counter); do
+            (
+                hostsFilterer "${tmpHosts}${i}"
+                cat "${tmpHosts}${i}" >> "$combinedFile"
+            ) &
+            jobCount=$((jobCount + 1))
+            [ "$jobCount" -ge "$jobLimit" ] && wait && jobCount=0
+        done
+        wait
+
+        # Download & process blocklists (cached + enabled)
+        for bl in porn gambling social fakenews; do 
+            blockVar="block_${bl}"
+            eval enabled=\$$blockVar
+            cacheHosts="${persistantDirectory}/cache/bl/hosts"
+
+            # download & process only if blocklist is enabled.
+            if [ "$enabled" = "1" ]; then
+                mkdir -p "${persistantDirectory}/cache/${bl}"
+                consoleMessage "  Fetching blocklists for $bl type hosts." "main: fetching blocklists for $bl type hosts."
+                fetch "${cacheHosts}1" "https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/${bl}-only/hosts"
+                if [ "$bl" = "porn" ]; then
+                    fetch "${cacheHosts}2" https://raw.githubusercontent.com/johnlouie09/Anti-Porn-HOSTS-File/refs/heads/master/HOSTS.txt
+                    fetch "${cacheHosts}3" https://raw.githubusercontent.com/Sinfonietta/hostfiles/refs/heads/master/pornography-hosts
+                    fetch "${cacheHosts}4" https://raw.githubusercontent.com/columndeeply/hosts/refs/heads/main/safebrowsing
+                fi
+                
+                # Process downloaded hosts
+                hostsFilterer "$persistantDirectory/cache/$bl/hosts"*
+
+                # Append only if enabled
+                cat "$persistantDirectory/cache/$bl/hosts"* >> "$combinedFile"
+                consoleMessage "- Finished fetching $bl blocklists " "main: Added $bl blocklist to the combined file."
+            fi
+        done
+        consoleMessage "  Installing hosts.." "main: Installing downloaded hosts.."
+        printf "127.0.0.1 localhost\n::1 localhost" > "${hostsFile}"
+        installHosts "all"
+
+        # donenenenenenenein
+        refreshCounts
+        updateStatus
+        consoleMessage "- Successfully updated all hosts." "main: Finished updating all hosts and refreshed the block counts."
+    ;;
+    *)
+        help
+        exit 1
     ;;
 esac
