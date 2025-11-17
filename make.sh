@@ -102,12 +102,12 @@ for args in "$@"; do
             done
         done
         echo -e "\e[0;36mmake: Info: Build finished without errors, be sure to check logs if concerned. Thank you!\e[0;37m"
-        echo -e "\e[0;35mmake: Info: Building Re-Malwack magisk module installer...\e[0;37m"
+        echo -e "\e[0;35mmake: Info: Building experimental Re-Malwack module installer...\e[0;37m"
         cd ./newExtendedModuleTemplateAdaptation/ || exit
         lastestCommitNum="$(git rev-list --count HEAD)"
         lastestCommitHash="$(git rev-parse --short HEAD)"
         lastestVersion="$(grep version ../update.json | head -n 1 | awk '{print $2}' | sed 's/,//' | xargs)"
-        sed -i "s/^name=.*/name=Re-Malwack | lastest-commit-nebula (#${lastestCommitNum}-${lastestCommitHash})/" module.prop
+        sed -i "s/^name=.*/name=Re-Malwack | lastest-commit-nebula-experimental (#${lastestCommitNum}-${lastestCommitHash})/" module.prop
         if ! zip -r "../Re-Malwack-Nebula.zip" . &>/dev/null; then
             git restore module.prop
             printf "\033[0;31mmake: Error: Failed to compress the module sources, please try again or install zip to proceed.\033[0m\n"
