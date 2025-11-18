@@ -23,7 +23,6 @@ baseBranch="main"
 baseModuleURL="https://raw.githubusercontent.com/ZG089/Re-Malwack/${baseBranch}/module"
 thingsToFetchAndMergeFromOrigin=(
     "banner.png"
-    "rmlwk.sh"
     "bin/armeabi-v7a/jq"
     "bin/arm64-v8a/jq"
     "common/sources.txt"
@@ -37,6 +36,7 @@ thingsToFetchAndMergeFromOrigin=(
     "webroot/assets/snowflakes.png"
 )
 thingsToVerifyChangesFromOrigin=(
+    "rmlwk.sh"
     "action.sh"
     "customize.sh"
     "import.sh"
@@ -90,6 +90,6 @@ if (( changes == 0 )); then
     echo "- No changes detected. Mirror is up to date."
 else
     git commit -m "github-actions: Sync the required changes into Nebula's mirror"
-    git push -u origin main &>/dev/null
+    git push -u origin experimental &>/dev/null
 fi
 # main:
