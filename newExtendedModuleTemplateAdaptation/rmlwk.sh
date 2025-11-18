@@ -50,7 +50,7 @@ function rmlwkBanner() {
             printf '\033[0;31m'
             echo "================================================================"
             printf '\033[0m'
-            ;;
+        ;;
         "2")
             printf '\033[0;31m'
             printf "██████╗ ███████╗    ███╗   ███╗ █████╗ ██╗     ██╗    ██╗ █████╗  ██████╗██╗  ██╗\n"
@@ -62,7 +62,7 @@ function rmlwkBanner() {
             printf '\033[0;31m'
             echo "===================================================================================="
             printf '\033[0m'
-            ;;
+        ;;
     esac
     updateStatus
 }
@@ -117,15 +117,15 @@ function parseShortAndLongBlockArgs() {
 
 function consoleMessage() {
     if [ "${throwOneToTwo}" == "true" ]; then
-        [ -z "$2" ] || echo "[$(date +"%m-%d-%Y %I:%M:%S %p")] $2" >> ${thisInstanceLogFile}
+        [ -z "$2" ] || echo -e "[$(date +"%m-%d-%Y %I:%M:%S %p")] $2 | $1" >> ${thisInstanceLogFile}
     else
-        echo "$1"
-        [ -z "$2" ] || echo "[$(date +"%m-%d-%Y %I:%M:%S %p")] $2" >> ${thisInstanceLogFile}
+        echo -e "$1"
+        [ -z "$2" ] || echo -e "[$(date +"%m-%d-%Y %I:%M:%S %p")] $2" >> ${thisInstanceLogFile}
     fi
 }
 
 function logShit() {
-    echo "[$(date +"%m-%d-%Y %I:%M:%S %p")] $1" >> ${thisInstanceLogFile}
+    echo -e "[$(date +"%m-%d-%Y %I:%M:%S %p")] $1" >> ${thisInstanceLogFile}
 }
 
 function abortInstance() {
@@ -135,7 +135,7 @@ function abortInstance() {
 }
 
 function tolower() {
-    echo "$1" | tr '[:upper:]' '[:lower:]'
+    echo -e "$1" | tr '[:upper:]' '[:lower:]'
 }
 
 function checkInternet() {
@@ -170,7 +170,7 @@ function isDefaultHosts() {
 function hostsFilterer() {
     local file="$1"
     [ ! -f "$file" ] && return 1;
-    echo "$file" | tr '[:upper:]' '[:lower:]' | grep -q "whitelist" && return 0
+    tolower "$file" | grep -q "whitelist" && return 0
     sed -i '/^[[:space:]]*#/d; s/[[:space:]]*#.*$//; /^[[:space:]]*$/d; s/^[[:space:]]*//; s/[[:space:]]*$//; s/\r$//; s/[[:space:]]\+/ /g' "$file"
 }
 
@@ -230,7 +230,7 @@ function removeHosts() {
 }
 
 function blockContent() {
-    local blockType="$1" status="$2" returnCode=0
+    local blockType="$1" status="$2"
     cacheHosts="$persistantDirectory/cache/$blockType/hosts"
     mkdir -p "$persistantDirectory/cache/$blockType"
     if [ "$status" = 0 ]; then
@@ -381,7 +381,48 @@ function updateStatus() {
             statusMessage="$statusMessage | Last updated: $lastMod"
         fi
     fi
-    sed -i "s/^description=.*/description=$statusMessage/" "$moduleDirectory/module.prop"
+    [ -n "${statusMessage}" ] && sed -i "s/^description=.*/description=$statusMessage/" "$moduleDirectory/module.prop"
+}
+
+function toggleCron() {
+    local JOB_DIR="/data/adb/Re-Malwack/auto_update"
+    local JOB_FILE="$JOB_DIR/root"
+    CRON_JOB="0 */12 * * * sh /data/adb/modules/Re-Malwack/rmlwk.sh --update-hosts && echo '[AUTO UPDATE TIME!!!]' >> /data/adb/Re-Malwack/logs/auto_update.log"
+    if [ "$1" == "disable" ]; then  
+        CRON_JOB="0 */12 * * * sh /data/adb/modules/Re-Malwack/rmlwk.sh --update-hosts && echo \"[$(date '+%Y-%m-%d %H:%M:%S')] - Running auto update.\" >> /data/adb/Re-Malwack/logs/auto_update.log"
+        logShit "toggleCron(): Disabling auto update cron work."
+        logShit "toggleCron(): Killing cron processes..."
+        busybox pkill crond > /dev/null 2>&1
+        busybox pkill busybox crond > /dev/null 2>&1
+        busybox pkill busybox crontab > /dev/null 2>&1
+        busybox pkill crontab > /dev/null 2>&1
+        logShit "toggleCron(): cron processes has been stopped."
+        # Check if cron job exists
+        if [ ! -d "$JOB_DIR" ]; then
+            consoleMessage "- Auto update is already disabled"
+        else    
+            rm -rf "$JOB_DIR"
+            logShit "toggleCron(): cron job removed."
+            sed -i 's/^daily_update=.*/daily_update=0/' "/data/adb/Re-Malwack/config.sh"
+            consoleMessage "- Auto-updates has been disabled." "toggleCron(): Auto-updates has been disabled."
+        fi
+    else
+        if [ -d "$JOB_DIR" ]; then
+            consoleMessage "- Auto update is already enabled"
+        else
+            mkdir -p "$JOB_DIR"
+            touch "$JOB_FILE"
+            echo "$CRON_JOB" >> "$JOB_FILE"
+            if ! busybox crontab "$JOB_FILE" -c "$JOB_DIR"; then
+                consoleMessage "  Failed to enable auto updates, this could be an issue with cron itself." "toggleCron(): Failed to enable auto update: cron-side error."
+            else
+                logShit "toggleCron(): cron job added."
+                crond -c $JOB_DIR -L $persistantDirectory/logs/auto_update.log
+                sed -i 's/^daily_update=.*/daily_update=1/' "/data/adb/Re-Malwack/config.sh"
+                consoleMessage "- Auto-updates has been enabled." "toggleCron(): Auto-updates has been enabled."
+            fi
+        fi
+    fi
 }
 
 function refreshCounts() {
@@ -428,6 +469,7 @@ function resumeBlocker() {
         exec "$0" --update-hosts
     fi
 }
+
 # main functions:
 
 # gbl starts from now on:
@@ -452,9 +494,7 @@ exit_code=$?
 timestamp=$(date +"%Y-%m-%d %I:%M:%S %p")
 
 case $exit_code in
-    0)
-        echo "[$timestamp] - [SUCCESS] - Script ran successfully with no errors" >> "$thisInstanceLogFile"
-        ;;
+    0)   echo "[$timestamp] - [SUCCESS] - Script ran successfully with no errors" >> "$thisInstanceLogFile" ;;
     1)   msg="General error" ;;
     126) msg="Command invoked cannot execute" ;;
     127) msg="Command not found" ;;
@@ -477,7 +517,7 @@ case "$(echo "${args}" | awk '{print $1}')" in
         pauseBlocker
     ;;
     "--reset|-r")
-        consoleMessage "- Running reset actions.." "main: User initiated a hosts reset!"
+        consoleMessage "\n- Running reset actions.." "main: User initiated a hosts reset!"
         isBlockerPaused && abortInstance "- Adblocker is paused and it cannot be reset. Please resume it before running this action." "main: User tried to reset service while the service is paused."
         consoleMessage "- Trying to revert previous changes..." "main: Hosts reset is triggered, trying to revert the changes.."
         printf "127.0.0.1 localhost\n::1 localhost" > "${hostsFile}"
@@ -512,10 +552,10 @@ case "$(echo "${args}" | awk '{print $1}')" in
             ;;
             *)
                 help
-                abortInstance "- Invalid argument!" "main: Expected argument not met, what we got instead: $clean | $args"
+                abortInstance "\n- Invalid argument!" "main: Expected argument not met, what we got instead: $clean | $args"
             ;;
         esac
-        consoleMessage "- Trying to run requested $blockType block action to get it $(if [ "$status" == "disable" ] || [ "$status" == "0" ]; then echo disabled; else echo enabled; fi)"
+        consoleMessage "\n- Trying to run requested $blockType block action to get it $(if [ "$status" == "disable" ] || [ "$status" == "0" ]; then echo disabled; else echo enabled; fi)"
         logShit "main: User requested for $blockType block type to get $(if [ "$status" == "disable" ] || [ "$status" == "0" ]; then echo disabled; else echo enabled; fi)"
         if [ "$blockType" = "trackers" ]; then
             blockTrackers
@@ -543,229 +583,251 @@ case "$(echo "${args}" | awk '{print $1}')" in
         updateStatus
     ;;
     "--whitelist|-w")
-        consoleMessage "- Trying to run whitelist actions on given domain.." "main: User requested for a domain to get whitelisted."
+        consoleMessage "\n- Trying to run whitelist actions on given domain(s).." "main: User requested for a domain(s) to get whitelisted."
         isBlockerPaused && abortInstance "- Adblocker is paused and it cannot be reset. Please resume it before running this action." "main: User tried to whitelist some links white the blocker is paused."
         isDefaultHosts && abortInstance "- You cannot whitelist links while hosts is reset." "main: User tried to whitelist some links while the hosts is reset."
         action="$2"
-        rawInput="$3"
-        if [ -z "$action" ] || [ -z "$rawInput" ] || { [ "$action" != "add" ] && [ "$action" != "remove" ]; }; then
+        shift 2
+        if [ -z "$action" ] || [ "$#" -ge 3 ] || { [ "$action" != "add" ] && [ "$action" != "remove" ]; }; then
             echo "[!] Invalid arguments for --whitelist|-w"
             echo "Usage: rmlwk --whitelist|-w <add|remove> <domain|pattern>"
             displayWhitelist=$(cat "$persistantDirectory/whitelist.txt" 2>/dev/null)
             [ -n "$displayWhitelist" ] && echo -e "Current whitelist:\n$displayWhitelist" || echo "Current whitelist: no saved whitelist"
             exit 1
         fi
-        
-        # extract host if a URL has been passed.
-        printf '%s' "$rawInput" | grep -qE '^https?://' && host=$(printf '%s' "$rawInput" | awk -F[/:] '{print $4}') || host="$rawInput"
-        
-        # Validate domain format (Special cases for wildcards)
-        if ! printf '%s' "$host" | grep -qE '(\*|\.)'; then
-            consoleMessage "  Invalid domain input: $rawInput"
-            abortInstance "- Inputs that are considered as valid: 'domain.com', '*.domain.com', '*something', 'something*'"
-        fi
-        
-        # Ensure the domain is not already blacklisted
-        grep -Fxq "$host" "$persistantDirectory/blacklist.txt" && abortInstance "- Cannot whitelist $rawInput, it already exists in blocklist." "main: User tried to whitelist a domain that exists in blocklist."
-        
-        # Determine wildcard mode
-        # - suffix wildcard if starts with "*.something" or ".something"
-        # - glob mode if contains '*' anywhere (over entire domain)
-        suffixWildcard=0
-        globMode=0
-        if printf '%s' "$host" | grep -qE '^\*\.|^\.'; then
-            suffixWildcard=1
-        elif printf '%s' "$host" | grep -q '\*'; then
-            globMode=1
-        fi
 
-        # Normalize the base domain/pattern
-        base="$host"
-        
-        # strip leading "*." or "." (one label or the dot)
-        [ "$suffixWildcard" -eq 1 ] && base="${base#*.}"
-        
-        # Build a domain-only ERE for matching the 2nd field in hosts
-        # 1) escape regex metachars except '*' (handled separately for glob mode)
-        escBase=$(printf '%s' "$base" | sed -e 's/[.[\^$+?(){}|\\]/\\&/g')
-        if [ "$suffixWildcard" -eq 1 ]; then
-            domRe="(^|.*\.)${escBase}$"
-        elif [ "$globMode" -eq 1 ]; then
-            domRe="^$(printf '%s' "$escBase" | sed 's/\*/.*/g')$"
-        else
-            domRe="^${escBase}$"
-        fi
-        if [ "$action" = "add" ]; then
-            case "$rawInput" in
-                \*\.*) # Subdomain: *.domain.com
-                    domain="${rawInput#*.}"
-                    escDomain=$(printf '%s' "$domain" | sed -e 's/[.[\^$+?(){}|\\]/\\&/g')
-                    pattern="^0\.0\.0\.0 [^.]+\\.${escDomain}\$"
-                    matchType="subdomain"
+        for rawInput in $@; do 
+            # extract host if a URL has been passed.
+            printf '%s' "$rawInput" | grep -qE '^https?://' && host=$(printf '%s' "$rawInput" | awk -F[/:] '{print $4}') || host="$rawInput"
+            
+            # Validate domain format (Special cases for wildcards)
+            if ! printf '%s' "$host" | grep -qE '(\*|\.)'; then
+                consoleMessage "  Invalid domain input: $rawInput"
+                consoleMessage "  Inputs that are considered as valid: 'domain.com', '*.domain.com', '*something', 'something*'"
+                continue
+            fi
+            
+            # Ensure the domain is not already blacklisted
+            if grep -Fxq "$host" "$persistantDirectory/blacklist.txt"; then
+                consoleMessage "  Cannot whitelist $rawInput, it already exists in blocklist." "main: User tried to whitelist a domain that exists in blocklist."
+                continue
+            fi
+            
+            # Determine wildcard mode
+            # - suffix wildcard if starts with "*.something" or ".something"
+            # - glob mode if contains '*' anywhere (over entire domain)
+            suffixWildcard=0
+            globMode=0
+            if printf '%s' "$host" | grep -qE '^\*\.|^\.'; then
+                suffixWildcard=1
+            elif printf '%s' "$host" | grep -q '\*'; then
+                globMode=1
+            fi
+
+            # Normalize the base domain/pattern
+            base="$host"
+            
+            # strip leading "*." or "." (one label or the dot)
+            [ "$suffixWildcard" -eq 1 ] && base="${base#*.}"
+            
+            # Build a domain-only ERE for matching the 2nd field in hosts
+            # 1) escape regex metachars except '*' (handled separately for glob mode)
+            escBase=$(printf '%s' "$base" | sed -e 's/[.[\^$+?(){}|\\]/\\&/g')
+            if [ "$suffixWildcard" -eq 1 ]; then
+                domRe="(^|.*\.)${escBase}$"
+            elif [ "$globMode" -eq 1 ]; then
+                domRe="^$(printf '%s' "$escBase" | sed 's/\*/.*/g')$"
+            else
+                domRe="^${escBase}$"
+            fi
+            if [ "$action" = "add" ]; then
+                case "$rawInput" in
+                    \*\.*) # Subdomain: *.domain.com
+                        domain="${rawInput#*.}"
+                        escDomain=$(printf '%s' "$domain" | sed -e 's/[.[\^$+?(){}|\\]/\\&/g')
+                        pattern="^0\.0\.0\.0 [^.]+\\.${escDomain}\$"
+                        matchType="subdomain"
                     ;;
-                \**) # Suffix: *something
-                    suffix="${rawInput#\*}"
-                    esc_suffix=$(printf '%s' "$suffix" | sed -e 's/[.[\^$+?(){}|\\]/\\&/g')
-                    pattern="^0\.0\.0\.0 .*${esc_suffix}\$"
-                    matchType="suffix"
+                    \**) # Suffix: *something
+                        suffix="${rawInput#\*}"
+                        escSuffix=$(printf '%s' "$suffix" | sed -e 's/[.[\^$+?(){}|\\]/\\&/g')
+                        pattern="^0\.0\.0\.0 .*${escSuffix}\$"
+                        matchType="suffix"
                     ;;
-                *\*) # Prefix: something*
-                    prefix="${rawInput%\*}"
-                    esc_prefix=$(printf '%s' "$prefix" | sed -e 's/[.[\^$+?(){}|\\]/\\&/g')
-                    pattern="^0\.0\.0\.0 ${esc_prefix}.*\$"
-                    matchType="prefix"
+                    *\*) # Prefix: something*
+                        prefix="${rawInput%\*}"
+                        escPrefix=$(printf '%s' "$prefix" | sed -e 's/[.[\^$+?(){}|\\]/\\&/g')
+                        pattern="^0\.0\.0\.0 ${escPrefix}.*\$"
+                        matchType="prefix"
                     ;;
-                *) # Exact
-                    domain="$rawInput"
-                    escDomain=$(printf '%s' "$domain" | sed -e 's/[.[\^$+?(){}|\\]/\\&/g')
-                    pattern="^0\.0\.0\.0 ${escDomain}\$"
-                    matchType="exact"
+                    *) # Exact
+                        domain="$rawInput"
+                        escDomain=$(printf '%s' "$domain" | sed -e 's/[.[\^$+?(){}|\\]/\\&/g')
+                        pattern="^0\.0\.0\.0 ${escDomain}\$"
+                        matchType="exact"
                     ;;
-            esac
-            # check if already whitelisted.
-            grep -qxF "$rawInput" "${persistantDirectory}/whitelist.txt" && abortInstance "- ${rawInput} is already whitelisted." "main: User requested domain cannot be added to the whitelist because it is already in the whitelist domain lists."
+                esac
+                # check if already whitelisted.
+                if grep -qxF "$rawInput" "${persistantDirectory}/whitelist.txt"; then
+                    consoleMessage "  ${rawInput} is already whitelisted." "main: User requested domain cannot be added to the whitelist because it is already in the whitelist domain lists."
+                    continue
+                fi
 
-            # Collect matches
-            matchedDomains=$(grep -E "$pattern" "$hostsFile" | awk '{print $2}' | sort -u)
-            [ -z "$matchedDomains" ] && abortInstance "- No matches found for ${rawInput}" "main: No matches has been found for the user requested whitelist domain."
+                # Collect matches
+                matchedDomains=$(grep -E "$pattern" "$hostsFile" | awk '{print $2}' | sort -u)
+                if [ -z "$matchedDomains" ]; then
+                    consoleMessage "  No matches found for ${rawInput}" "main: No matches has been found for the user requested whitelist domain."
+                    continue
+                fi
 
-            # Remove blacklisted entries from the match set 
-            [ -s "$persistantDirectory/blacklist.txt" ] && matchedDomains=$(printf '%s\n' "$matchedDomains" | grep -Fvxf "$persistantDirectory/blacklist.txt")
+                # Remove blacklisted entries from the match set 
+                [ -s "$persistantDirectory/blacklist.txt" ] && matchedDomains=$(printf '%s\n' "$matchedDomains" | grep -Fvxf "$persistantDirectory/blacklist.txt")
 
-            # If nothing left, bail out
-            # This code may be removed in the future?
-            # I only wrote it just in case a very rare chance that all matched domains are blacklisted
-            # Like, someone tries to whitelist the whole blacklisted domains list in one wildcard :sob:
-            # idk who's going to do such a thing like this, but uhmmmmmm
-            [ -z "$matchedDomains" ] && abortInstance "- All matched domains are already blacklisted, nothing to whitelist."            
-        
-            # Add matched domains to whitelist file
-            consoleMessage "  Whitelisting ($matchType): $rawInput" "main: Whitelisting ($matchType): $rawInput. Domains: $matchedDomains"
-            for md in $matchedDomains; do
-                grep -qxF "$md" "$persistantDirectory/whitelist.txt" && echo "$md" >> "$persistantDirectory/whitelist.txt"
-            done
+                # If nothing left, bail out
+                # This code may be removed in the future?
+                # I only wrote it just in case a very rare chance that all matched domains are blacklisted
+                # Like, someone tries to whitelist the whole blacklisted domains list in one wildcard :sob:
+                # idk who's going to do such a thing like this, but uhmmmmmm
+                if [ -z "$matchedDomains" ]; then
+                    consoleMessage "  Matched domains for this input is already blacklisted, nothing to whitelist."
+                    continue
+                fi
+            
+                # Add matched domains to whitelist file
+                consoleMessage "- Whitelisting ($matchType): $rawInput" "main: Whitelisting ($matchType): $rawInput. Domains: $matchedDomains"
+                for md in $matchedDomains; do
+                    grep -qxF "$md" "$persistantDirectory/whitelist.txt" && echo "$md" >> "$persistantDirectory/whitelist.txt"
+                done
 
-            # Rewrite hosts file excluding matched domains
-            tmpHosts="$persistantDirectory/tmp.hosts.$$"
-            grep -Ev "$pattern" "$hostsFile" > "$tmpHosts"
-            cat "$tmpHosts" > "$hostsFile"
-            rm -f "$tmpHosts"
+                # Rewrite hosts file excluding matched domains
+                tmpHosts="$persistantDirectory/tmp.hosts.$$"
+                grep -Ev "$pattern" "$hostsFile" > "$tmpHosts"
+                cat "$tmpHosts" > "$hostsFile"
+                rm -f "$tmpHosts"
 
-            # Deduplicate whitelist file
-            tmpf="$persistantDirectory/.whitelist.sorted.$$"
-            sort -u "$persistantDirectory/whitelist.txt" > "$tmpf" && mv "$tmpf" "$persistantDirectory/whitelist.txt"
-            consoleMessage "  Whitelisted ($matchType): $rawInput"
-            consoleMessage "  Added the following domain(s) to whitelist and removed from hosts:"
-            printf "  %s\n" $matchedDomains
-            # added this to fit with the first text!
-            consoleMessage "- Thanks for using Re-Malwack!"
-            logShit "main: Whitelisted $rawInput ($matchType)."
-        else 
-            logShit "main: Removing $host from whitelist..."
-            grep -Eq "$domRe" "$persistantDirectory/whitelist.txt" || abortInstance "- $host is not found in whitelist." "main: user requested host is not found in the whitelist."
-            tmpf="$persistantDirectory/.whitelist.$$"
-                
-            # Extract entries that are being removed
-            removedEntries=$(grep -E "$domRe" "$persistantDirectory/whitelist.txt")
-                
-            # Remove entry from whitelist file
-            grep -Ev "$domRe" "$persistantDirectory/whitelist.txt" > "$tmpf" || true
-            mv "$tmpf" "$persistantDirectory/whitelist.txt"
-                
-            # Re-add them into hosts (blocked form)
-            for re in $removedEntries; do
-                grep -qE "^0\.0\.0\.0[[:space:]]+$re\$" "$hostsFile" || echo -e "\n0.0.0.0 $re" >> "$hostsFile"
-            done
-            consoleMessage "- $host removed from whitelist. Domain(s) are now blocked again." "main: Removed hosts (pattern) from whitelist and re-blocked domains."
-        fi
+                # Deduplicate whitelist file
+                tmpf="$persistantDirectory/.whitelist.sorted.$$"
+                sort -u "$persistantDirectory/whitelist.txt" > "$tmpf" && mv "$tmpf" "$persistantDirectory/whitelist.txt"
+                consoleMessage "- Whitelisted ($matchType): $rawInput"
+                logShit "main: Whitelisted $rawInput ($matchType)."
+            else 
+                logShit "main: Removing $host from whitelist..."
+                grep -Eq "$domRe" "$persistantDirectory/whitelist.txt" || abortInstance "- $host is not found in whitelist." "main: user requested host is not found in the whitelist."
+                tmpf="$persistantDirectory/.whitelist.$$"
+                    
+                # Extract entries that are being removed
+                removedEntries=$(grep -E "$domRe" "$persistantDirectory/whitelist.txt")
+                    
+                # Remove entry from whitelist file
+                grep -Ev "$domRe" "$persistantDirectory/whitelist.txt" > "$tmpf" || true
+                mv "$tmpf" "$persistantDirectory/whitelist.txt"
+                    
+                # Re-add them into hosts (blocked form)
+                for re in $removedEntries; do
+                    grep -qE "^0\.0\.0\.0[[:space:]]+$re\$" "$hostsFile" || echo -e "\n0.0.0.0 $re" >> "$hostsFile"
+                done
+                consoleMessage "- $host removed from whitelist. Domain(s) are now blocked again." "main: Removed hosts (pattern) from whitelist and re-blocked domains."
+            fi
+            consoleMessage " "
+        done
     ;;
     "--blocklist|--blacklist|-b")
-        consoleMessage "- Trying to run whitelist actions on given domain.." "main: User requested for a domain to get whitelisted."
+        consoleMessage "\n- Trying to run whitelist actions on given domain.." "main: User requested for a domain to get whitelisted."
         isBlockerPaused && abortInstance "- Adblocker is paused and it cannot be reset. Please resume it before running this action." "main: User tried to blocklist some links white the blocker is paused."
         option="$2"
-        rawInput="$3"
-
-        # Sanitize input
-        printf "%s" "$rawInput" | grep -qE '^https?://' && domain=$(printf "%s" "$rawInput" | awk -F[/:] '{print $4}') || domain="$rawInput"
-                
-        if [ "$option" != "add" ] && [ "$option" != "remove" ] || [ -z "$domain" ]; then
-            echo "Usage: rmlwk --blacklist, -b <add/remove> <domain>"
+        if [ "$option" != "add" ] && [ "$option" != "remove" ]; then
+            echo "Usage: rmlwk --blocklist, -b <add/remove> <domain>"
             displayBlocklist=$(cat "$persistantDirectory/blacklist.txt" 2>/dev/null)
             [ -n "$displayBlocklist" ] && echo -e "Current blacklist:\n$displayBlocklist" || echo "Current blacklist: no saved blacklist"
             exit 1
-        else
+        fi
+        shift 2
+        for rawInput in $@; do
+            # Sanitize input
+            printf "%s" "$rawInput" | grep -qE '^https?://' && domain=$(printf "%s" "$rawInput" | awk -F[/:] '{print $4}') || domain="$rawInput"
+            
             # Validate domain format
             if ! printf '%s' "$domain" | grep -qiE '^[a-z0-9.-]+\.[a-z]{2,}$'; then
-                consoleMessage "  Invalid domain $domain" "main: User gave an invaild domain in the blocklist action."
-                abortInstance "-  Example valid domain: example.com"
+                consoleMessage "  Invalid domain: $domain" "main: User gave an invaild domain in the blocklist action."
+                consoleMessage "- Example valid domain: example.com"
+                continue
             fi
+            
             # Ensure the domain is not already whitelisted
-            grep -Fxq "$host" "$persistantDirectory/whitelist.txt" && abortInstance "- Cannot blocklist $rawInput, it already exists in whitelist." "main: User tried to blocklist a domain that exists in whitelist."
+            if grep -Fxq "$domain" "$persistantDirectory/whitelist.txt"; then
+                consoleMessage "- Cannot blocklist $domain, it already exists in blocklist." "main: User tried to blocklist a domain that exists in whitelist."
+                continue
+            fi
+            
             if [ "$option" = "add" ]; then
                 # Add to hosts file if not already present
                 grep -qE "^0\.0\.0\.0[[:space:]]+$domain\$" "$hostsFile" && abortInstance "- $domain is already blocked" "main: User tried to block a domain that is already blocked."
-                consoleMessage "  Blocklisting $domain..." "main: Trying to add user requested domain to the blocklist.."
-                
+                consoleMessage "- Blocklisting $domain..." "main: Trying to add user requested domain to the blocklist.."
+                    
                 # Add to blacklist.txt if not already there
                 grep -qxF "$domain" "$persistantDirectory/blacklist.txt" || echo "$domain" >> "$persistantDirectory/blacklist.txt"
-                
+                    
                 # Ensure newline at end before appending
-                [ -s "$hostsFile" ] && tail -c1 "$hostsFile" | grep -qv $'\n' && echo "" >> "$hostsFile"
-                echo "0.0.0.0 $domain" >> "$hostsFile"
+                [ -s "$hostsFile" ] && tail -c1 "$hostsFile" | grep -qv $'\n' && echo -e "\n0.0.0.0 $domain" >> "$hostsFile" || echo -e "0.0.0.0 $domain" >> "$hostsFile"
                 consoleMessage "- Added $domain to the hosts file and blocklist." "main: Finished adding requested $domain to the hosts and blocklist file."
-                refreshCounts
-                updateStatus
             else
                 # Remove from blacklist.txt and hosts
-                consoleMessage "  Removing $domain from the blocklist..." "main: Trying to remove user requested domain from the blocklist.."
-                grep -qxF "$domain" "$persistantDirectory/blacklist.txt" || abortInstance "- $domain is not found in blocklist." "main: User requested domain is not found in the blocklist."
+                consoleMessage "- Removing $domain from the blocklist..." "main: Trying to remove user requested domain from the blocklist.."
+                if ! grep -qxF "$domain" "$persistantDirectory/blacklist.txt"; then
+                    consoleMessage "  $domain is not found in blocklist." "main: User requested domain is not found in the blocklist."
+                    continue
+                fi
                 sed -i "/^$(printf '%s' "$domain" | sed 's/[]\/$*.^|[]/\\&/g')$/d" "$persistantDirectory/blacklist.txt"
                 tmpHosts="$persistantDirectory/tmp.hosts.$$"
                 grep -vF "0.0.0.0 $domain" "$hostsFile" > "$tmpHosts"
                 cat "$tmpHosts" > "$hostsFile"
                 rm -f "$tmpHosts"
                 consoleMessage "- $domain has been removed from blocklist and unblocked." "main: Removed $domain from the blocklist and unblocked."
-                [ "$WEBUI" = "true" ] || refreshCounts && updateStatus
             fi
-        fi
+            consoleMessage " "
+        done
+        refreshCounts
+        updateStatus
     ;;
     --custom-source|-c)
-        consoleMessage "- Trying to run custom sources actions on given domain.." "main: User requested for a custom source to be managed."
+        consoleMessage "\n- Trying to run custom sources actions on given domain.." "main: User requested for a custom source to be managed."
         option="$2"
-        domain="$3"
-        if [ -z "$option" ]; then
-            consoleMessage "- Missing argument: You must specify 'add' or 'remove'."
-            abortInstance "   Usage: rmlwk --custom-source <add/remove> <domain>" "main: User did not give a option argument."
+        if [ "$#" -ge "3" ]; then
+            help;
+            abortInstance "- Required arguments are not given" "main: Expected argument style is not met, what we got instead: $clean | $args"
         fi
         if [ "$option" != "add" ] && [ "$option" != "remove" ]; then
-            consoleMessage "- Invalid option: Use 'add' or 'remove'."
-            abortInstance "  Usage: rmlwk --custom-source <add/remove> <domain>" "main: User gave an invalid option: $option"
+            help;
+            abortInstance "- Usage: rmlwk --custom-source <add/remove> <domain>" "main: User gave an invalid option: $option"
         fi
-        if [ -z "$domain" ]; then
-            consoleMessage "- Missing domain: You must specify a domain."
-            abortInstance "   Usage: rmlwk --custom-source <add/remove> <domain>" "main: User missed to provide the domain argument."
-        fi
-        # Validate URL format (accept http/https)
-        if ! printf '%s' "$domain" | grep -qiE '^(https?://[a-z0-9.-]+\.[a-z]{2,}(/.*)?|[a-z0-9.-]+\.[a-z]{2,})$'; then
-            consoleMessage "- Invalid domain: $domain"
-            abortInstance "   Example valid domain: example.com, https://example.com or https://example.com/hosts.txt" "main: User gave an invalid domain in the custom sources action."
-        fi
-        if [ "$option" = "add" ]; then
-            grep -qx "$domain" "$persistantDirectory/sources.txt" && abortInstance "- $domain is already in sources." "main: User gave an domain that is already in the sources."
-            #uhrmm
-            echo "$domain" >> "$persistantDirectory/sources.txt"
-            consoleMessage "- Added $domain to the sources." "main: Added user requested domain to the sources."
-        else
-            if grep -qx "$domain" "$persistantDirectory/sources.txt"; then
-                sed -i "/^$(printf '%s' "$domain" | sed 's/[]\/$*.^|[]/\\&/g')$/d" "$persistantDirectory/sources.txt"
-                consoleMessage "- Removed $domain from the sources." "main: Removed user requested domain from the sources."
-            else
-                consoleMessage "- $domain is not found in the sources." "main: Failed to remove user requested domain, maybe it was not even found? Who knows right?"
+        shift 2
+        for domain in $@; do
+            # Validate URL format (accept http/https)
+            if ! printf '%s' "$domain" | grep -qiE '^(https?://[a-z0-9.-]+\.[a-z]{2,}(/.*)?|[a-z0-9.-]+\.[a-z]{2,})$'; then
+                consoleMessage "  Invalid domain: $domain"
+                consoleMessage "- Example valid domain: example.com, https://example.com or https://example.com/hosts.txt" "main: User gave an invalid domain in the custom sources action."
+                continue
             fi
-        fi
+            consoleMessage "- Trying to $([ "${option}" == "add" ] && echo add || echo remove) $domain into the sources.." "main: trying to $([ "${option}" == "add" ] && echo add || echo remove) user's custom domain in the sources."
+            if [ "$option" = "add" ]; then
+                if grep -qx "$domain" "$persistantDirectory/sources.txt"; then
+                    consoleMessage "- $domain is already in sources." "main: User gave an domain that is already present in the sources."
+                    continue
+                fi
+                echo "$domain" >> "$persistantDirectory/sources.txt"
+                consoleMessage "- Added $domain to the sources." "main: Added user requested domain to the sources."
+            else
+                if grep -qx "$domain" "$persistantDirectory/sources.txt"; then
+                    sed -i "/^$(printf '%s' "$domain" | sed 's/[]\/$*.^|[]/\\&/g')$/d" "$persistantDirectory/sources.txt"
+                    consoleMessage "- Removed $domain from the sources." "main: Removed user requested domain from the sources."
+                else
+                    consoleMessage "- $domain is not found in the sources." "main: Failed to remove user requested domain, maybe it was not even found? Who knows right?"
+                fi
+            fi
+        done
     ;;
     --update-hosts|-u)
-        consoleMessage "- Trying to run hosts updater action.." "main: User requested for a hosts update."
+        consoleMessage "\n- Trying to run hosts updater action.." "main: User requested for a hosts update."
         isBlockerPaused && abortInstance "- Adblocker is paused and it cannot be reset. Please resume it before running this action." "main: User tried to update hosts white the blocker is paused."
         combinedFile="${tmpHosts}_all"
         > "$combinedFile"
@@ -775,22 +837,11 @@ case "$(echo "${args}" | awk '{print $1}')" in
         counter=0
         for host in $(grep -Ev '^#|^$' "$persistantDirectory/sources.txt" | sort -u); do
             fetch "${tmpHosts}${counter}" "$host"
+            hostsFilterer "${tmpHosts}${counter}"
+            cat "${tmpHosts}${counter}" >> "$combinedFile"
             counter=$((counter + 1))
         done
-        
-        # Process in parallel
-        jobLimit=4
-        jobCount=0
-        for i in $(seq 1 $counter); do
-            (
-                hostsFilterer "${tmpHosts}${i}"
-                cat "${tmpHosts}${i}" >> "$combinedFile"
-            ) &
-            jobCount=$((jobCount + 1))
-            [ "$jobCount" -ge "$jobLimit" ] && wait && jobCount=0
-        done
-        wait
-
+    
         # Download & process blocklists (cached + enabled)
         for bl in porn gambling social fakenews; do 
             blockVar="block_${bl}"
@@ -813,16 +864,17 @@ case "$(echo "${args}" | awk '{print $1}')" in
 
                 # Append only if enabled
                 cat "$persistantDirectory/cache/$bl/hosts"* >> "$combinedFile"
-                consoleMessage "- Finished fetching $bl blocklists " "main: Added $bl blocklist to the combined file."
+                consoleMessage "  Finished fetching $bl blocklists " "main: Added $bl blocklist to the combined file."
             fi
         done
         consoleMessage "  Installing hosts.." "main: Installing downloaded hosts.."
         printf "127.0.0.1 localhost\n::1 localhost" > "${hostsFile}"
         installHosts "all"
-
-        # donenenenenenenein
         refreshCounts
         updateStatus
+    ;;
+    --auto-update|-a)
+        toggleCron "$(tolower "$2")"
     ;;
     *)
         help

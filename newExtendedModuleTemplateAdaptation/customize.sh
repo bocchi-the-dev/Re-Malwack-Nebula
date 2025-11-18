@@ -62,11 +62,6 @@ consolePrint " "
 
 # Add a persistent directory to save configuration
 consolePrint "- Preparing Re-Malwack environment.."
-# download the rmlwk.sh from the repository to always have the update version of it.
-rm -rf "${persistentDirectory}/rmlwk.sh"
-loopInternetCheck --wait
-downloadContentFromWEB "https://github.com/ZG089/Re-Malwack/blob/main/module/rmlwk.sh?raw=true" "${persistentDirectory}/rmlwk.sh" || \ 
-    abortInstance "  Failed to download the lastest Re-Malwack script from the origin repository, please try again later!"
 for types in block_porn block_gambling block_fakenews block_social block_trackers daily_update; do
     grep -q "^$types=" "$configFile" || echo "$types=0" >> "$configFile"
 done
