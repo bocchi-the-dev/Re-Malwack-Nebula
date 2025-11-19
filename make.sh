@@ -108,11 +108,12 @@ for args in "$@"; do
         lastestCommitHash="$(git rev-parse --short HEAD)"
         lastestVersion="$(grep version ../update.json | head -n 1 | awk '{print $2}' | sed 's/,//' | xargs)"
         sed -i "s/^name=.*/name=Re-Malwack | lastest-commit-nebula-experimental (#${lastestCommitNum}-${lastestCommitHash})/" module.prop
-        if ! zip -r "../Re-Malwack-Nebula.zip" . &>/dev/null; then
+        if ! zip -r "../Re-Malwack-Nebula-exp.zip" . &>/dev/null; then
             git restore module.prop
             printf "\033[0;31mmake: Error: Failed to compress the module sources, please try again or install zip to proceed.\033[0m\n"
             exit 1
         fi
+        git restore module.prop
         cd ../
         echo -e "\e[0;36mmake: Info: Build finished without errors\e[0;37m"
     elif [[ -n "${SDK}" && -n "${CC}" && "${lowerCaseArgument}" == *hoshiko* ]]; then

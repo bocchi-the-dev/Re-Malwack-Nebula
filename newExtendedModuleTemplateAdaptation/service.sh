@@ -94,23 +94,23 @@ fi
 
 # Here goes the part where we actually determine module status
 if isProtectionPaused; then
-    statusMsg="Status: Protection is paused ⏸️"
+    statusMsg="Status: Protection is paused"
 elif isDefaultHosts; then
     if [ "$blocklistCount" -gt 0 ]; then
         plural="entries are active"
         [ "$blocklistCount" -eq 1 ] && plural="entry is active"
-        statusMsg="Status: Protection is disabled due to reset ❌ | Only $blocklistCount blacklist $plural"
+        statusMsg="Status: Protection is disabled due to reset | Only $blocklistCount blacklist $plural"
     else
-        statusMsg="Status: Protection is disabled due to reset ❌"
+        statusMsg="Status: Protection is disabled due to reset"
     fi
 elif [ "$blockedMod" -ge 0 ]; then
     if [ "$blockedSys" -eq 0 ] && [ "$blockedMod" -gt 0 ]; then
-        statusMsg="Status: ❌ Critical Error Detected (Broken hosts mount). Please check your root manager settings and disable any conflicted module(s)."
+        statusMsg="Status: Critical Error Detected (Broken hosts mount). Please check your root manager settings and disable any conflicted module(s)."
     elif [ "$blockedMod" -ne "$blockedSys" ]; then # Only for cases if mount is broken between module hosts and system hosts
-        statusMsg="Status: Reboot required to apply changes 🔃 | Module blocks $blockedMod domains, system hosts blocks $blockedSys."
+        statusMsg="Status: Reboot required to apply changes | Module blocks $blockedMod domains, system hosts blocks $blockedSys."
     else
-        statusMsg="Status: Protection is enabled ✅ | Blocking $blockedMod domains"
-        [ "$blocklistCount" -gt 0 ] && statusMsg="Status: Protection is enabled ✅ | Blocking $((blockedMod - blocklistCount)) domains + $blocklistCount (blacklist)"
+        statusMsg="Status: Protection is enabled | Blocking $blockedMod domains"
+        [ "$blocklistCount" -gt 0 ] && statusMsg="Status: Protection is enabled | Blocking $((blockedMod - blocklistCount)) domains + $blocklistCount (blacklist)"
         [ "$whitelistCount" -gt 0 ] && statusMsg="$statusMsg | Whitelist: $whitelistCount"
         statusMsg="$statusMsg | Last updated: $lastMod"
     fi
@@ -129,5 +129,5 @@ if [ "$daily_update" = 1 ]; then
 fi
 
 # Apply module status into module description
-sed -i "s/^description=.*/description=$statusMsg/" "$MODDIR/module.prop"
+[ -n "${statusMsg}" ] && sed -i "s/^description=.*/description=$statusMsg/" "$MODDIR/module.prop"
 logMessage "$statusMsg"

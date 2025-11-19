@@ -2,6 +2,7 @@
 # shellcheck disable=SC2112
 # shellcheck disable=SC3043
 # shellcheck disable=SC3009
+# shellcheck disable=SC2068
 # Welcome to the main script of the module :)
 # Side notes: Literally everything in this module relies on this script you're checking right now.
 # customize.sh (installer script), action script and even WebUI!
@@ -15,11 +16,9 @@ moduleDirectory="$(dirname "${realPath}")"
 hostsFile="$moduleDirectory/system/etc/hosts"
 systemHosts="/system/etc/hosts"
 tmpHosts="/data/local/tmp/hosts"
-version="$(grep '^version=' "$moduleDirectory/module.prop" | cut -d= -f2-)"
 thisInstanceLogFile="$persistantDirectory/logs/Re-Malwack_$(date +%Y-%m-%d_%H%M%S).log"
 # redirect error messages to /dev/stderr for logging when the action.sh is executed.
 [ -n "$isRanByActions" ] && thisInstanceLogFile="/dev/stderr" 
-thisSessionLock="$persistantDirectory/lock"
 prodOEM=$(tolower "$(getprop ro.product.brand)")
 
 # pre-setup:
@@ -95,26 +94,6 @@ function help() {
 # PURE FREEAKING HEADACHEEEEEE
 
 # helper functions:
-function parseShortAndLongBlockArgs() {
-    case "$1" in
-        "t|trackers")
-            echo trackers
-        ;;
-        "s|social")
-            echo social
-        ;;
-        "f|fakenews")
-            echo fakenews
-        ;;
-        "g|gambling")
-            echo gambling
-        ;;
-        "p|porn")
-            echo porn
-        ;;
-    esac
-}
-
 function consoleMessage() {
     if [ "${throwOneToTwo}" == "true" ]; then
         [ -z "$2" ] || echo -e "[$(date +"%m-%d-%Y %I:%M:%S %p")] $2 | $1" >> ${thisInstanceLogFile}
@@ -541,11 +520,31 @@ case "$(echo "${args}" | awk '{print $1}')" in
         updateStatus
         consoleMessage "- Successfully reset hosts." "main: Hosts reset is finished with $? code"
     ;;
-    --block=*|--b?| -b? )
+    --block=*|-b?)
         clean="${args#--block=}"
         clean="${clean#-b}"
         status="$2"
-        blockType="$(parseShortAndLongBlockArgs "${clean}")"
+        blockType="$(
+            case "${clean}" in
+                "t")
+                    echo "trackers"
+                ;;
+                "s")
+                    echo "social"
+                ;;
+                "f")
+                    echo "fakenews"
+                ;;
+                "g")
+                    echo "gambling"
+                ;;
+                "p")
+                    echo "porn"
+                ;;
+                *)
+                    echo "${clean}"
+                ;;
+            esac)"
         case "$clean" in
             porn|gambling|fakenews|social|trackers|t|s|f|g|p)
                 :
@@ -558,7 +557,7 @@ case "$(echo "${args}" | awk '{print $1}')" in
         consoleMessage "\n- Trying to run requested $blockType block action to get it $(if [ "$status" == "disable" ] || [ "$status" == "0" ]; then echo disabled; else echo enabled; fi)"
         logShit "main: User requested for $blockType block type to get $(if [ "$status" == "disable" ] || [ "$status" == "0" ]; then echo disabled; else echo enabled; fi)"
         if [ "$blockType" = "trackers" ]; then
-            blockTrackers
+            blockTrackers "$status"
         else
             eval "block_toggle\"\$block_${blockType}\""
             if [ "$status" == "disable" ] || [ "$status" == "0" ]; then
