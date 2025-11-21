@@ -22,8 +22,12 @@ thisInstanceLogFile="$persistantDirectory/logs/Re-Malwack_$(date +%Y-%m-%d_%H%M%
 prodOEM=$(tolower "$(getprop ro.product.brand)")
 
 # pre-setup:
-mkdir -p $persistantDirectory/{logs,counts,cache/whitelist,cache/trackers}
-touch "$persistantDirectory/"{blacklist.txt,sources.txt,whitelist.txt}
+for i in logs counts cache/whitelist cache/trackers; do
+    for j in blacklist.txt sources.txt whitelist.txt; do
+        mkdir -p $persistantDirectory/$i
+        touch $persistantDirectory/$j
+    done
+done
 PREVPATH="${PATH}"
 PATH="/data/adb/ap/bin:/data/adb/ksu/bin:/data/adb/magisk:/data/data/com.termux/files/usr/bin:$PREVPATH"
 
@@ -551,7 +555,7 @@ case "$(echo "${args}" | awk '{print $1}')" in
             ;;
             *)
                 help
-                abortInstance "\n- Invalid argument!" "main: Expected argument not met, what we got instead: $clean | $args"
+                abortInstance "\n- Invalid option argument!" "main: Expected argument not met, what we got instead: $clean | $args"
             ;;
         esac
         consoleMessage "\n- Trying to run requested $blockType block action to get it $(if [ "$status" == "disable" ] || [ "$status" == "0" ]; then echo disabled; else echo enabled; fi)"
