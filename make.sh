@@ -38,6 +38,11 @@ if ! cd "$(realpath "$(dirname "$0")")"; then
     exit 1;
 fi
 
+# uhrm ig
+if [ ! -d "${CC_ROOT}" ]; then
+	CC_ROOT="/workspaces/android-ndk-r27d/toolchains/llvm/prebuilt/linux-x86_64/bin"
+fi
+
 # print the banner:
 printf ":::.    :::..,::::::  :::::::.   ...    ::: :::      :::.     \n"
 printf "\`;;;;,  \`;;;;;;;\'\'\'\'   ;;;\'\';;\'  ;;     ;;; ;;;      ;;\`;;    \n"
