@@ -9,32 +9,42 @@
 
 # ====== Variables ======
 quiet_mode=0
+is_zn_detected=0
 persist_dir="/data/adb/Re-Malwack"
 REALPATH=$(readlink -f "$0")
 MODDIR=$(dirname "$REALPATH")
-hosts_file="$MODDIR/system/etc/hosts"
 system_hosts="/system/etc/hosts"
 tmp_hosts="/data/local/tmp/hosts"
 version=$(grep '^version=' "$MODDIR/module.prop" | cut -d= -f2-)
 LOGFILE="$persist_dir/logs/Re-Malwack_$(date +%Y-%m-%d_%H%M%S).log"
 
 # ====== Pre-func ======
+
+# 1 - Check if zygisk host redirect module is enabled
+zn_module_dir="/data/adb/modules/hostsredirect"
+if [ -d "$zn_module_dir" ] && [ ! -f "$zn_module_dir/disable" ]; then
+    is_zn_detected=1
+    hosts_file="/data/adb/hostsredirect/hosts"
+    log_message "Zygisk host redirect module detected, using /data/adb/hostsredirect/hosts"
+else
+    hosts_file="$MODDIR/system/etc/hosts"
+    log_message "Using standard mount method with $MODDIR/system/etc/hosts"
+fi
+
+# 2 - Sourcing config file
 . "$persist_dir/config.sh"
+# 3 - creating logs dir in case if not created
 mkdir -p "$persist_dir/logs"
 
 # ====== Functions ======
 function rmlwk_banner() {
-    
     [ "$quiet_mode" -eq 1 ] && return
-
     clear
-
     if command -v shuf >/dev/null 2>&1; then
         random_index=$(shuf -i 1-2 -n 1)
     else
         random_index=$(( ($(date +%s) % 2) + 1 ))
     fi
-
     case "$random_index" in
         1)
             printf '\033[0;31m'
@@ -54,7 +64,6 @@ function rmlwk_banner() {
             printf "╚═╝  ╚═╝╚══════╝    ╚═╝     ╚═╝╚═╝  ╚═╝╚══════╝ ╚══╝╚══╝ ╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝\n"
             ;;
     esac
-
     printf '\033[0m'
     update_status
     echo ""
@@ -351,6 +360,25 @@ function block_content() {
     fi
     log_duration "block_content ($block_type, $status)" "$start_time"
 }
+
+# Function to remount hosts
+function remount_hosts() {
+    if [ "$is_zn_detected" -eq 1 ]; then
+        log_message "zn-hostsredirect detected, skipping mount operation"
+        return 0
+    fi
+    log_message "Attempting to remount hosts..."
+    echo "[*] Attempting to remount hosts..."
+    umount -l "$system_hosts" 2>/dev/null || log_message WARN "Failed to unmount $system_hosts"
+    mount --bind "$hosts_file" "$system_hosts" || {
+        log_message ERROR "Failed to bind mount $hosts_file to $system_hosts"
+        echo "[!] Failed to remount hosts, please report to developer!"
+        return 1
+    }
+    log_message SUCCESS "Hosts remounted successfully."
+    echo "[✓] Hosts remounted successfully."
+}
+
 # Function to block trackers
 function block_trackers() {
     start_time=$(date +%s)
@@ -516,9 +544,20 @@ function update_status() {
         fi
     elif [ "$blocked_mod" -ge 0 ]; then
         if [ "$blocked_sys" -eq 0 ] && [ "$blocked_mod" -gt 0 ]; then
-            status_msg="Status: ❌ Critical Error Detected (Broken hosts mount). Please check your root manager settings and disable any conflicted module(s)."
-            echo "[!!!] Critical Error Detected (Broken hosts mount). Please check your root manager settings and disable any conflicted module(s)."
-            echo "[!!!] Module hosts blocks $blocked_mod domains, System hosts blocks none."
+            # Attempt to remount hosts and refresh status
+            # Only in case of broken mount detection
+            remount_hosts
+            refresh_blocked_counts
+            if [ "$blocked_sys" -eq 0 ] && [ "$blocked_mod" -gt 0 ]; then
+                status_msg="Status: ❌ Critical Error Detected (Hosts Mount Failure). Please check your root manager settings and disable any conflicted module(s)."
+                echo "[!!!] Critical Error Detected (Hosts Mount Failure). Please check your root manager settings and disable any conflicted module(s)."
+                echo "[!!!] Module hosts blocks $blocked_mod domains, System hosts blocks none."
+            else
+                status_msg="Status: Protection is enabled ✅ | Blocking $blocked_mod domains"
+                [ "$blacklist_count" -gt 0 ] && status_msg="Status: Protection is enabled ✅ | Blocking $((blocked_mod - blacklist_count)) domains + $blacklist_count (blacklist)"
+                [ "$whitelist_count" -gt 0 ] && status_msg="$status_msg | Whitelist: $whitelist_count"
+                status_msg="$status_msg | Last updated: $last_mod"
+            fi
         elif [ "$blocked_mod" -ne "$blocked_sys" ]; then
             status_msg="Status: Reboot required to apply changes 🔃 | Module blocks $blocked_mod domains, system hosts blocks $blocked_sys."
             echo "[i] Reboot required to apply changes 🔃 | Module blocks $blocked_mod domains, system hosts blocks $blocked_sys."
