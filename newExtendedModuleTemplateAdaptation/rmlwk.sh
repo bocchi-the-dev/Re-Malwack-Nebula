@@ -20,6 +20,8 @@ thisInstanceLogFile="$persistantDirectory/logs/Re-Malwack_$(date +%Y-%m-%d_%H%M%
 # redirect error messages to /dev/stderr for logging when the action.sh is executed.
 [ -n "$isRanByActions" ] && thisInstanceLogFile="/dev/stderr" 
 prodOEM=$(tolower "$(getprop ro.product.brand)")
+isZNDetected=false
+ZNModuleDir="/data/adb/modules/hostsredirect"
 
 # pre-setup:
 for i in logs counts cache/whitelist cache/trackers; do
@@ -251,6 +253,22 @@ function blockContent() {
     fi
 }
 
+function remountHosts()
+{
+    if [ "$isZNDetected" == "true" ]; then
+        logShit "ZN Hosts redirect is found, skipping mount operation.";
+        return 0;
+    fi
+    consoleMessage "Attempting for a hosts remount..." "remountHosts(): Attempting for a hosts remount..."
+    umount -l "$systemHosts" &>/dev/null || logShit "remountHosts(): Failed to unmount $systemHosts"
+    if ! mount --bind "$hostsFile" "$systemHosts"; then
+        consoleMessage "- Failed to remount hosts, please report this issue to the developer!" "remountHosts(): Failed to mount $hostsFile -> $systemHosts";
+        return 1;
+    else
+        consoleMessage "Hosts has been remounted successfully." "remountHosts(): Hosts remounted."
+    fi
+}
+
 function blockTrackers() {
     status="$1"
     cacheHosts="${persistantDirectory}/cache/trackers/hosts"
@@ -337,6 +355,10 @@ function updateStatus() {
     logShit "Whitelist entries count: $whitelist_count"
     logShit "System hosts entries count: $blocked_sys"
     logShit "Module hosts entries count: $blocked_mod"
+
+    # Determine mode based on zn-hostsredirect detection
+    [ "$isZNDetected" == "true" ] && mode="hosts mount mode: zn-hostsredirect" || mode="hosts mount mode: Standard mount"
+
     if isBlockerPaused; then
         statusMessage="Status: Re-Malwack is paused temporarily now."
     elif [ -d "/data/adb/modules_update/Re-Malwack" ]; then
@@ -352,16 +374,22 @@ function updateStatus() {
             statusMessage="Status: Protection is disabled due to reset."
         fi
     elif [ "$blocked_mod" -ge 0 ]; then
-        if [ "$blocked_sys" -eq 0 ] && [ "$blocked_mod" -gt 0 ]; then
+        if [ "$blocked_sys" -eq 0 ] && [ "$blocked_mod" -gt 0 ] && [ "$is_zn_detected" -ne 1 ]; then
+            # Attempt to remount hosts and refresh status
+            # Only in case of broken mount detection - @ZG089
+            remountHosts
+            refreshCounts
+            if [ "$blocked_sys" -eq 0 ] && [ "$blocked_mod" -gt 0 ]; then
+                statusMessage="Status: Critical Error Detected (Hosts Mount Failure). Please check your root manager settings and disable any conflicted module(s)."
+                consolePrint "- Critical Error Detected (Hosts mount failure). Please check your root manager settings and disable any conflicting module(s)."
+            fi
             statusMessage="Critical: Hosts mount is broken and it needs to be fixed. Please check your root manager settings and disable any conflicted module(s)."
             consoleMessage "- Critical error found! Solution: Please check your root manager settings and disable any conflicted module(s)." "updateStatus(): Hosts mount is broken."
-        elif [ "$blocked_mod" -ne "$blocked_sys" ]; then
-            statusMessage="Status: Reboot required to apply changes | Module blocks: $blocked_mod domains, system hosts blocks $blocked_sys."
         else
             statusMessage="Status: Protection is enabled | Blocking $blocked_mod domains"
             [ "$blacklist_count" -ge 1 ] && statusMessage="Status: Protection is enabled | Blocking $((blocked_mod - blacklist_count)) domains + $blacklist_count (blacklist)"
             [ "$whitelist_count" -ge 1 ] && statusMessage="$statusMessage | Whitelist: $whitelist_count"
-            statusMessage="$statusMessage | Last updated: $lastMod"
+            statusMessage="$statusMessage | Last updated: $lastMod | $mode"
         fi
     fi
     [ -n "${statusMessage}" ] && sed -i "s/^description=.*/description=$statusMessage/" "$moduleDirectory/module.prop"
@@ -488,6 +516,15 @@ esac
 
 [ $exit_code -ne 0 ] && echo "[$timestamp] - [ERROR] - $msg at line $LINENO (exit code: $exit_code)" >> "$thisInstanceLogFile"
 ' EXIT
+
+# check if zygisk host redirect module is enabled - @ZG089
+if [ -d "$ZNModuleDir" ] && [ ! -f "$ZNModuleDir/disable" ]; then
+    isZNDetected=true
+    hostsFile="$ZNModuleDir/hosts"
+    logShit "Zygisk hosts redirect module is found, using it's hosts from now on."
+else 
+    logShit "Using standard mount method with system hosts."
+fi
 
 # print the banner thing.
 rmlwkBanner
