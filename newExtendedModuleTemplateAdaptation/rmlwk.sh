@@ -102,7 +102,7 @@ function help() {
 # helper functions:
 function consoleMessage() {
     if [ "${throwOneToTwo}" == "true" ]; then
-        [ -z "$2" ] || echo -e "[$(date +"%m-%d-%Y %I:%M:%S %p")] $2 | $1" >> ${thisInstanceLogFile}
+        echo -e "[$(date +"%m-%d-%Y %I:%M:%S %p")] $2 | $1" >> ${thisInstanceLogFile}
     else
         echo -e "$1"
         [ -z "$2" ] || echo -e "[$(date +"%m-%d-%Y %I:%M:%S %p")] $2" >> ${thisInstanceLogFile}
@@ -161,6 +161,7 @@ function hostsFilterer() {
 
 function stageBlocklistFiles() {
     local i=1
+    local file
     for file in "$persistantDirectory/cache/$1/hosts"*; do
         [ -f "$file" ] || continue
         cp -f "$file" "${tmpHosts}${i}"
@@ -374,7 +375,7 @@ function updateStatus() {
             statusMessage="Status: Protection is disabled due to reset."
         fi
     elif [ "$blocked_mod" -ge 0 ]; then
-        if [ "$blocked_sys" -eq 0 ] && [ "$blocked_mod" -gt 0 ] && [ "$is_zn_detected" -ne 1 ]; then
+        if [ "$blocked_sys" -eq 0 ] && [ "$blocked_mod" -gt 0 ] && [ "$isZNDetected" -ne 1 ]; then
             # Attempt to remount hosts and refresh status
             # Only in case of broken mount detection - @ZG089
             remountHosts
