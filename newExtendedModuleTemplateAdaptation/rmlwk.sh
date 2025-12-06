@@ -22,13 +22,14 @@ thisInstanceLogFile="$persistantDirectory/logs/Re-Malwack_$(date +%Y-%m-%d_%H%M%
 prodOEM=$(tolower "$(getprop ro.product.brand)")
 isZNDetected=false
 ZNModuleDir="/data/adb/modules/hostsredirect"
+isHoshiko=false
 
 # pre-setup:
 for i in logs counts cache/whitelist cache/trackers; do
-    for j in blacklist.txt sources.txt whitelist.txt; do
-        mkdir -p $persistantDirectory/$i
-        touch $persistantDirectory/$j
-    done
+    mkdir -p $persistantDirectory/$i
+done
+for j in blacklist.txt sources.txt whitelist.txt; do
+    touch $persistantDirectory/$j
 done
 PREVPATH="${PATH}"
 PATH="/data/adb/ap/bin:/data/adb/ksu/bin:/data/adb/magisk:/data/data/com.termux/files/usr/bin:$PREVPATH"
@@ -38,6 +39,15 @@ source "/data/adb/Re-Malwack/config.sh" || . "/data/adb/Re-Malwack/config.sh"
 
 # set `throwOneToTwo` if we got --quiet in the args
 echo "$@" | grep -q "--quiet" && throwOneToTwo=true || throwOneToTwo=false
+
+# change the log file path if we got --hoshiko in the args and also set the throw.. to true to
+# just log everything inside the file.
+if echo "$@" | grep -q "--hoshiko"; then
+    throwOneToTwo=true
+    thisInstanceLogFile="/sdcard/Android/data/alya.roshidere.lana/logs"
+    mkdir -p "$(basename "${thisInstanceLogFile}")"
+    isHoshiko=true
+fi
 
 # PURE FREEAKING HEADACHEEEEEE
 function rmlwkBanner() {
@@ -74,7 +84,7 @@ function rmlwkBanner() {
 
 function help() {
     rmlwkBanner
-    logShit "help(): Arguments given by user: $args"
+    logShit "help(): Arguments given by user: $args" "INFO"
     consoleMessage "- Usage: $(basename "$0") [--OPTION] [SUB-OPTION]"
     consoleMessage ""
     consoleMessage "  Normal Options:"
@@ -102,19 +112,19 @@ function help() {
 # helper functions:
 function consoleMessage() {
     if [ "${throwOneToTwo}" == "true" ]; then
-        echo -e "[$(date +"%m-%d-%Y %I:%M:%S %p")] $2 | $1" >> ${thisInstanceLogFile}
+        [ -z "$2" ] && return 0 || echo -e "$3: $2" >> ${thisInstanceLogFile}
     else
         echo -e "$1"
-        [ -z "$2" ] || echo -e "[$(date +"%m-%d-%Y %I:%M:%S %p")] $2" >> ${thisInstanceLogFile}
+        [ -z "$2" ] && return 0 || echo -e "$3: $2" >> ${thisInstanceLogFile}
     fi
 }
 
 function logShit() {
-    echo -e "[$(date +"%m-%d-%Y %I:%M:%S %p")] $1" >> ${thisInstanceLogFile}
+    [ -n "$2" ] && echo -e "$2: $1" >> ${thisInstanceLogFile}
 }
 
 function abortInstance() {
-    consoleMessage "$1" "$2"
+    consoleMessage "$1" "$2" "ABORT"
     export PATH="${PREVPATH}"
     exit 1;
 }
@@ -170,15 +180,15 @@ function stageBlocklistFiles() {
 }
 
 function installHosts() {
-    consoleMessage "- Trying to fetch module repo's whitelist files.." "installHosts(): fetchin' some whitelist from the origin repo.."
+    consoleMessage "- Trying to fetch module repo's whitelist files.." "installHosts(): fetchin' some whitelist from the origin repo.." "INFO"
     fetch "$persistantDirectory/cache/whitelist/whitelist.txt" https://raw.githubusercontent.com/ZG089/Re-Malwack/main/whitelist.txt
     fetch "$persistantDirectory/cache/whitelist/social_whitelist.txt" https://raw.githubusercontent.com/ZG089/Re-Malwack/main/social_whitelist.txt
-    consoleMessage "  Starting to install $1 hosts..." "installHosts(): Installing $1 hosts.."
+    consoleMessage "  Starting to install $1 hosts..." "installHosts(): Installing $1 hosts.." "INFO"
     cp -f "$hostsFile" "${tmpHosts}0"
-    consoleMessage "  Trying to prepare blocklists.." "installHosts(): Preparing blocklists.."
+    consoleMessage "  Trying to prepare blocklists.." "installHosts(): Preparing blocklists.." "INFO"
     local whitelistFile="${persistantDirectory}/cache/whitelist/whitelist.txt"
     [ "${block_social}" -eq 0 ] && whitelistFile="${whitelistFile} ${persistantDirectory}/cache/whitelist/social_whitelist.txt" || \
-        consoleMessage "  Social block triggered, social whitelist won't be applied" "installHosts(): Social whitelist won't be applied because the social block is triggered already."
+        consoleMessage "  Social block triggered, social whitelist won't be applied" "installHosts(): Social whitelist won't be applied because the social block is triggered already." "WARN"
     [ -s "$persistantDirectory/whitelist.txt" ] && whitelistFile="$whitelistFile $persistantDirectory/whitelist.txt"
     
     # merge the whole whitelist into one single one!
@@ -187,32 +197,32 @@ function installHosts() {
     
     # In case of hosts update (since only combined file exists only on --update-hosts)
     if [ -f "$combinedFile" ]; then
-        consoleMessage "- Unified hosts has been found, sorting it.." "installHosts(): Sorting unified hosts.."
+        consoleMessage "- Unified hosts has been found, sorting it.." "installHosts(): Sorting unified hosts.." "INFO"
         cat "${tmpHosts}0" >> "$combinedFile" 
         awk '!seen[$0]++' "$combinedFile" > "${tmpHosts}merged.sorted"
     else
-        consoleMessage "  Multiple hosts has been found, doing a merge + sort on them." "installHosts(): Doing a merge and sort on multiple hosts.."
+        consoleMessage "  Multiple hosts has been found, doing a merge + sort on them." "installHosts(): Doing a merge and sort on multiple hosts.." "INFO"
         LC_ALL=C sort -u "${tmpHosts}"[!0] "${tmpHosts}0" > "${tmpHosts}merged.sorted"
     fi
-    consoleMessage "- Trying to merge hosts into one..." "installHosts(): Doing a hosts merge and copying them into one.."
+    consoleMessage "- Trying to merge hosts into one..." "installHosts(): Doing a hosts merge and copying them into one.." "INFO"
     grep -Fvxf "${tmpHosts}w" "${tmpHosts}merged.sorted" > "$hostsFile"
     chmod 644 "$hostsFile"
     rm -f "${tmpHosts}"* 2>/dev/null
-    consoleMessage "- Successfully installed $1 hosts, thank you!" "installHosts(): installed $1 hosts successfully."
+    consoleMessage "- Successfully installed $1 hosts, thank you!" "installHosts(): installed $1 hosts successfully." "INFO"
     return 0
 }
 
 function removeHosts() {
-    consoleMessage "- Starting to remove hosts" "removeHosts(): Tryin' to remove nonsense? idk"
+    consoleMessage "- Starting to remove hosts" "removeHosts(): Tryin' to remove nonsense? idk" "INFO"
     cp -f "$hostsFile" "${tmpHosts}0"
     cat "$cacheHosts"* | sort -u > "${tmpHosts}1"
     awk 'NR==FNR {seen[$0]=1; next} !seen[$0]' "${tmpHosts}1" "${tmpHosts}0" > "$hostsFile"
     if [ ! -s "$hostsFile" ]; then
-        consoleMessage "  Seems like the main hosts file is empty, restoring it's default entries.." "removeHosts(): Restoring the default entries on the main hosts file.."
+        consoleMessage "  Seems like the main hosts file is empty, restoring it's default entries.." "removeHosts(): Restoring the default entries on the main hosts file.." "WARN"
         echo -e "127.0.0.1 localhost\n::1 localhost" > "$hostsFile"
     fi
     rm -f "${tmpHosts}"* 2>/dev/null
-    consoleMessage "- Finished removing hosts" "removeHosts(): Finished removin' nonsense."
+    consoleMessage "- Finished removing hosts" "removeHosts(): Finished removin' nonsense." "INFO"
 }
 
 function blockContent() {
@@ -221,7 +231,7 @@ function blockContent() {
     mkdir -p "$persistantDirectory/cache/$blockType"
     if [ "$status" = 0 ]; then
         if [ ! -f "${cacheHosts}1" ]; then
-            consoleMessage "- No cached $blockType blocklist is found, redownloading it to disable it properly.." "blockContent(): Cached ${blockType} blocklist is missing, setting it up again to disable it properly..."
+            consoleMessage "- No cached $blockType blocklist is found, redownloading it to disable it properly.." "blockContent(): Cached ${blockType} blocklist is missing, setting it up again to disable it properly..." "WARN"
             fetch "${cacheHosts}1" "https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/${blockType}-only/hosts"
             if [ "${blockType}" = "porn" ]; then
                 fetch "${cacheHosts}2" https://raw.githubusercontent.com/johnlouie09/Anti-Porn-HOSTS-File/refs/heads/master/HOSTS.txt
@@ -233,10 +243,10 @@ function blockContent() {
         fi
         removeHosts
         sed -i "s/^block_${blockType}=.*/block_${blockType}=0/" "/data/adb/Re-Malwack/config.sh"
-        consoleMessage "- Disabled $blockType blocklist" "blockContent(): Disabled $blockType"
+        consoleMessage "- Disabled $blockType blocklist" "blockContent(): Disabled $blockType" "INFO"
     else
         if [ ! -f "${cacheHosts}1" ] || [ "${status}" = "update" ]; then
-            consoleMessage "- Trying to download hosts for $blockType block.."
+            consoleMessage "- Trying to download hosts for $blockType block.." "INFO"
             fetch "${cacheHosts}1" "https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/${blockType}-only/hosts"
             if [ "$blockType" = "porn" ]; then
                 fetch "${cacheHosts}2" https://raw.githubusercontent.com/johnlouie09/Anti-Porn-HOSTS-File/refs/heads/master/HOSTS.txt
@@ -249,7 +259,7 @@ function blockContent() {
             stageBlocklistFiles "$blockType"
             installHosts "$blockType"
             sed -i "s/^block_${blockType}=.*/block_${blockType}=1/" "/data/adb/Re-Malwack/config.sh"
-            consoleMessage "- Enabled $blockType blocklist." "blockContent(): Enabled $blockType blocklist.."
+            consoleMessage "- Enabled $blockType blocklist." "blockContent(): Enabled $blockType blocklist.." "INFO"
         fi
     fi
 }
@@ -257,16 +267,16 @@ function blockContent() {
 function remountHosts()
 {
     if [ "$isZNDetected" == "true" ]; then
-        logShit "ZN Hosts redirect is found, skipping mount operation.";
+        logShit "remountHosts(): ZN Hosts redirect is found, skipping mount operation." "INFO";
         return 0;
     fi
-    consoleMessage "Attempting for a hosts remount..." "remountHosts(): Attempting for a hosts remount..."
-    umount -l "$systemHosts" &>/dev/null || logShit "remountHosts(): Failed to unmount $systemHosts"
+    consoleMessage "Attempting for a hosts remount..." "remountHosts(): Attempting for a hosts remount..." "INFO"
+    umount -l "$systemHosts" &>/dev/null || logShit "remountHosts(): Failed to unmount $systemHosts" "FAILURE"
     if ! mount --bind "$hostsFile" "$systemHosts"; then
-        consoleMessage "- Failed to remount hosts, please report this issue to the developer!" "remountHosts(): Failed to mount $hostsFile -> $systemHosts";
+        consoleMessage "- Failed to remount hosts, please report this issue to the developer!" "remountHosts(): Failed to mount $hostsFile -> $systemHosts" "FAILURE";
         return 1;
     else
-        consoleMessage "Hosts has been remounted successfully." "remountHosts(): Hosts remounted."
+        consoleMessage "Hosts has been remounted successfully." "remountHosts(): Hosts remounted." "INFO"
     fi
 }
 
@@ -285,7 +295,7 @@ function blockTrackers() {
                     abortInstance "Your ${prodOEM} is not found in the oem trackers blocklists, aborting this instance." "blockTrackers(): User's ${prodOEM} is not supported for blocking OEM trackers."
                 ;;
             esac
-            consoleMessage "- No cached trackers blocklist file found for your $prodOEM, re-downloading before removal." "blockTrackers(): Re-downloading tracker hosts.."
+            consoleMessage "- No cached trackers blocklist file found for your $prodOEM, re-downloading before removal." "blockTrackers(): Re-downloading tracker hosts.." "WARN"
             fetch "${cacheHosts}1" "https://raw.githubusercontent.com/r-a-y/mobile-hosts/refs/heads/master/AdguardTracking.txt"
             hostsFilterer "${cacheHosts}1"
             fetch "${cacheHosts}2" "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/hosts/native.$(
@@ -305,14 +315,14 @@ function blockTrackers() {
             stageBlocklistFiles "trackers"
             installHosts "trackers"
         fi
-        consoleMessage "  Disabling trackers block for $prodOEM device."
+        consoleMessage "  Disabling trackers block for $prodOEM device." "INFO"
         removeHosts
         sed -i "s/^block_trackers=.*/block_trackers=0/" "/data/adb/Re-Malwack/config.sh"
-        consoleMessage "- Trackers block has been disabled" "blockTrackers(): User's request for blocking the trackers has been disabled."
+        consoleMessage "- Trackers block has been disabled" "blockTrackers(): User's request for blocking the trackers has been disabled." "INFO"
     else
         [ "$block_trackers" = 1 ] && abortInstance "- Tracker blocking is already enabled." "blockTrackers: User tried to block trackers while it's already blocked."
         if ! ls "${cacheHosts}"* >/dev/null 2&1; then
-            consoleMessage "- Fetching trackers block hosts for $prodOEM" "blockTrackers(): Fetching trackers block hosts for $prodOEM"
+            consoleMessage "- Fetching trackers block hosts for $prodOEM" "blockTrackers(): Fetching trackers block hosts for $prodOEM" "INFO"
             fetch "${cacheHosts}1" "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/hosts/native.$(
                 case "${prodOEM}" in
                     xiaomi|poco|redmi)
@@ -327,11 +337,11 @@ function blockTrackers() {
                 esac
             ).txt"
             hostsFilterer "${cacheHosts}1"
-            consoleMessage "  Enabling trackers block for $prodOEM device." "blockTrackers(): Enabling trackers block for $prodOEM device."
+            consoleMessage "  Enabling trackers block for $prodOEM device." "blockTrackers(): Enabling trackers block for $prodOEM device." "INFO"
             stageBlocklistFiles "trackers"
             installHosts "trackers"
             sed -i "s/^block_trackers=.*/block_trackers=1/" "/data/adb/Re-Malwack/config.sh"
-            consoleMessage "- Trackers block has been enabled" "blockTrackers(): User's request for blocking the trackers has been enabled."
+            consoleMessage "- Trackers block has been enabled" "blockTrackers(): User's request for blocking the trackers has been enabled." "INFO"
         fi
     fi
 }
@@ -352,10 +362,10 @@ function updateStatus() {
     [ -f "$persistantDirectory/whitelist.txt" ] && whitelist_count=$(grep -c '^[^#[:space:]]' "$persistantDirectory/whitelist.txt")
     
     # whatever
-    logShit "Blacklist entries count: $blacklist_count"
-    logShit "Whitelist entries count: $whitelist_count"
-    logShit "System hosts entries count: $blocked_sys"
-    logShit "Module hosts entries count: $blocked_mod"
+    logShit "updateStatus(): Blacklist entries count: $blacklist_count" "INFO"
+    logShit "updateStatus(): Whitelist entries count: $whitelist_count" "INFO"
+    logShit "updateStatus(): System hosts entries count: $blocked_sys" "INFO"
+    logShit "updateStatus(): Module hosts entries count: $blocked_mod" "INFO"
 
     # Determine mode based on zn-hostsredirect detection
     [ "$isZNDetected" == "true" ] && mode="hosts mount mode: zn-hostsredirect" || mode="hosts mount mode: Standard mount"
@@ -385,7 +395,7 @@ function updateStatus() {
                 consolePrint "- Critical Error Detected (Hosts mount failure). Please check your root manager settings and disable any conflicting module(s)."
             fi
             statusMessage="Critical: Hosts mount is broken and it needs to be fixed. Please check your root manager settings and disable any conflicted module(s)."
-            consoleMessage "- Critical error found! Solution: Please check your root manager settings and disable any conflicted module(s)." "updateStatus(): Hosts mount is broken."
+            consoleMessage "- Critical error found! Solution: Please check your root manager settings and disable any conflicted module(s)." "updateStatus(): Hosts mount is broken." "WARN"
         else
             statusMessage="Status: Protection is enabled | Blocking $blocked_mod domains"
             [ "$blacklist_count" -ge 1 ] && statusMessage="Status: Protection is enabled | Blocking $((blocked_mod - blacklist_count)) domains + $blacklist_count (blacklist)"
@@ -402,36 +412,36 @@ function toggleCron() {
     CRON_JOB="0 */12 * * * sh /data/adb/modules/Re-Malwack/rmlwk.sh --update-hosts && echo '[AUTO UPDATE TIME!!!]' >> /data/adb/Re-Malwack/logs/auto_update.log"
     if [ "$1" == "disable" ]; then  
         CRON_JOB="0 */12 * * * sh /data/adb/modules/Re-Malwack/rmlwk.sh --update-hosts && echo \"[$(date '+%Y-%m-%d %H:%M:%S')] - Running auto update.\" >> /data/adb/Re-Malwack/logs/auto_update.log"
-        logShit "toggleCron(): Disabling auto update cron work."
-        logShit "toggleCron(): Killing cron processes..."
+        logShit "toggleCron(): Disabling auto update cron work." "INFO"
+        logShit "toggleCron(): Killing cron processes..." "INFO"
         busybox pkill crond > /dev/null 2>&1
         busybox pkill busybox crond > /dev/null 2>&1
         busybox pkill busybox crontab > /dev/null 2>&1
         busybox pkill crontab > /dev/null 2>&1
-        logShit "toggleCron(): cron processes has been stopped."
+        logShit "toggleCron(): cron processes has been stopped." "INFO"
         # Check if cron job exists
         if [ ! -d "$JOB_DIR" ]; then
-            consoleMessage "- Auto update is already disabled"
+            consoleMessage "- Auto update is already disabled" "INFO"
         else    
             rm -rf "$JOB_DIR"
-            logShit "toggleCron(): cron job removed."
+            logShit "toggleCron(): cron job removed." "INFO"
             sed -i 's/^daily_update=.*/daily_update=0/' "/data/adb/Re-Malwack/config.sh"
-            consoleMessage "- Auto-updates has been disabled." "toggleCron(): Auto-updates has been disabled."
+            consoleMessage "- Auto-updates has been disabled." "toggleCron(): Auto-updates has been disabled." "INFO"
         fi
     else
         if [ -d "$JOB_DIR" ]; then
-            consoleMessage "- Auto update is already enabled"
+            consoleMessage "- Auto update is already enabled" "INFO"
         else
             mkdir -p "$JOB_DIR"
             touch "$JOB_FILE"
             echo "$CRON_JOB" >> "$JOB_FILE"
             if ! busybox crontab "$JOB_FILE" -c "$JOB_DIR"; then
-                consoleMessage "  Failed to enable auto updates, this could be an issue with cron itself." "toggleCron(): Failed to enable auto update: cron-side error."
+                consoleMessage "  Failed to enable auto updates, this could be an issue with cron itself." "toggleCron(): Failed to enable auto update: cron-side error." "INFO"
             else
-                logShit "toggleCron(): cron job added."
+                logShit "toggleCron(): cron job added." "INFO"
                 crond -c $JOB_DIR -L $persistantDirectory/logs/auto_update.log
                 sed -i 's/^daily_update=.*/daily_update=1/' "/data/adb/Re-Malwack/config.sh"
-                consoleMessage "- Auto-updates has been enabled." "toggleCron(): Auto-updates has been enabled."
+                consoleMessage "- Auto-updates has been enabled." "toggleCron(): Auto-updates has been enabled." "INFO"
             fi
         fi
     fi
@@ -453,30 +463,27 @@ function pauseBlocker() {
         resumeBlocker
         exit 0
     fi
-    if isDefaultHosts && ! isBlockerPaused; then
-        consoleMessage "- You cannot pause protections while hosts is reset." "pauseBlocker(): User tried to pause protections while the hosts is reset."
-        exit 1
-    fi
-    consoleMessage "- Trying to resume protections..." "pauseBlocker(): Trying to resume protections.."
+    isDefaultHosts || abortInstance "- You cannot pause protections while hosts is reset." "pauseBlocker(): User tried to pause protections while the hosts is reset." "FAILURE"
+    consoleMessage "- Trying to resume protections..." "pauseBlocker(): Trying to resume protections.." "INFO"
     cp "$hostsFile" "$persistantDirectory/hosts.bak"
     printf "127.0.0.1 localhost\n::1 localhost\n" > "$hostsFile"
     sed -i 's/^adblock_switch=.*/adblock_switch=1/' "/data/adb/Re-Malwack/config.sh"
     refreshCounts
     updateStatus
-    consoleMessage "  Protection has been paused." "pauseBlocker(): Re-Malwack is paused now, the services will remain suspended till the user resumes the service."
+    consoleMessage "  Protection has been paused." "pauseBlocker(): Re-Malwack is paused now, the services will remain suspended till the user resumes the service." "INFO"
 }
 
 function resumeBlocker() {
-    consoleMessage "- Trying to resume protection..." "resumeBlocker(): Trying to resume protections.."
+    consoleMessage "- Trying to resume protection..." "resumeBlocker(): Trying to resume protections.." "INFO"
     if [ -f "$persistantDirectory/hosts.bak" ]; then
         cat "$persistantDirectory/hosts.bak" > "$hostsFile"
         rm -f $persistantDirectory/hosts.bak
         sed -i 's/^adblock_switch=.*/adblock_switch=0/' "/data/adb/Re-Malwack/config.sh"
         refreshCounts
         updateStatus
-        consoleMessage "  Protection has been resumed." "resumeBlocker(): Re-Malwack services has been started! the services will get resumed soon!"
+        consoleMessage "  Protection has been resumed." "resumeBlocker(): Re-Malwack services has been started! the services will get resumed soon!" "INFO"
     else
-        consoleMessage "  Backup hosts file is missing in the expected path, running an update as a fallback action." "resumeBlocker(): Force resuming protection and running hosts update as a fallback action due to the missing backup hosts file."
+        consoleMessage "  Backup hosts file is missing in the expected path, running an update as a fallback action." "resumeBlocker(): Force resuming protection and running hosts update as a fallback action due to the missing backup hosts file." "WARN"
         sed -i 's/^adblock_switch=.*/adblock_switch=0/' "/data/adb/Re-Malwack/config.sh"
         exec "$0" --update-hosts
     fi
@@ -522,9 +529,9 @@ esac
 if [ -d "$ZNModuleDir" ] && [ ! -f "$ZNModuleDir/disable" ]; then
     isZNDetected=true
     hostsFile="$ZNModuleDir/hosts"
-    logShit "Zygisk hosts redirect module is found, using it's hosts from now on."
+    logShit "main-rmlwk: Zygisk hosts redirect module is found, using it's hosts from now on." "INFO"
 else 
-    logShit "Using standard mount method with system hosts."
+    logShit "main-rmlwk: Using standard mount method with system hosts." "INFO"
 fi
 
 # print the banner thing.
@@ -538,15 +545,15 @@ case "$(echo "${args}" | awk '{print $1}')" in
         pauseBlocker
     ;;
     "--reset|-r")
-        consoleMessage "\n- Running reset actions.." "main: User initiated a hosts reset!"
-        isBlockerPaused && abortInstance "- Adblocker is paused and it cannot be reset. Please resume it before running this action." "main: User tried to reset service while the service is paused."
-        consoleMessage "- Trying to revert previous changes..." "main: Hosts reset is triggered, trying to revert the changes.."
+        consoleMessage "\n- Running reset actions.." "main-rmlwk: User initiated a hosts reset!" "INFO"
+        isBlockerPaused && abortInstance "- Adblocker is paused and it cannot be reset. Please resume it before running this action." "main-rmlwk: User tried to reset service while the service is paused."
+        consoleMessage "- Trying to revert previous changes..." "main-rmlwk: Hosts reset is triggered, trying to revert the changes.." "INFO"
         printf "127.0.0.1 localhost\n::1 localhost" > "${hostsFile}"
         
         # re-add blocklist entries after reset if they exist :/
         if [ -s "${persistantDirectory}/blacklist.txt" ]; then
             consoleMessage "  Re-inserting blocklist entries after a reset trigger..." \
-                "main: Re-inserting the blocklist entries (${persistantDirectory}/blacklist.txt exists and has some content inside it)"
+                "main-rmlwk: Re-inserting the blocklist entries (${persistantDirectory}/blacklist.txt exists and has some content inside it)" "INFO"
             grep -VFxf "${persistantDirectory}/blacklist.txt" "${hostsFile}" > "${tmpHosts}_b"
             while read -r line; do
                 echo "0.0.0.0 $line"
@@ -560,7 +567,7 @@ case "$(echo "${args}" | awk '{print $1}')" in
         sed -i 's/^block_\(.*\)=.*/block_\1=0/' "/data/adb/Re-Malwack/config.sh"
         refreshCounts
         updateStatus
-        consoleMessage "- Successfully reset hosts." "main: Hosts reset is finished with $? code"
+        consoleMessage "- Successfully reset hosts." "main-rmlwk: Hosts reset is finished with $? code" "INFO"
     ;;
     --block=*|-b?)
         clean="${args#--block=}"
@@ -593,30 +600,30 @@ case "$(echo "${args}" | awk '{print $1}')" in
             ;;
             *)
                 help
-                abortInstance "\n- Invalid option argument!" "main: Expected argument not met, what we got instead: $clean | $args"
+                abortInstance "\n- Invalid option argument!" "main-rmlwk: Expected argument not met, what we got instead: $clean | $args"
             ;;
         esac
         consoleMessage "\n- Trying to run requested $blockType block action to get it $(if [ "$status" == "disable" ] || [ "$status" == "0" ]; then echo disabled; else echo enabled; fi)"
-        logShit "main: User requested for $blockType block type to get $(if [ "$status" == "disable" ] || [ "$status" == "0" ]; then echo disabled; else echo enabled; fi)"
+        logShit "main-rmlwk: User requested for $blockType block type to get $(if [ "$status" == "disable" ] || [ "$status" == "0" ]; then echo disabled; else echo enabled; fi)" "INFO"
         if [ "$blockType" = "trackers" ]; then
             blockTrackers "$status"
         else
             eval "block_toggle\"\$block_${blockType}\""
             if [ "$status" == "disable" ] || [ "$status" == "0" ]; then
                 if [ "$block_toggle" = 0 ]; then
-                    abortInstance "- ${blockType} is already blocked." "main: ${blockType} block is already disabled."
+                    abortInstance "- ${blockType} is already blocked." "main-rmlwk: ${blockType} block is already disabled."
                 else 
-                    consoleMessage "- Disabling ${blockType} ads block type..." "main: ${blockType} block type disable has been initialized."
+                    consoleMessage "- Disabling ${blockType} ads block type..." "main-rmlwk: ${blockType} block type disable has been initialized." "INFO"
                     blockContent "${blockType}" 0
-                    consoleMessage "- Unblocked ${blockType} sites successfully :/" "main: unblocked ${blockType} sites."
+                    consoleMessage "- Unblocked ${blockType} sites successfully :/" "main-rmlwk: unblocked ${blockType} sites." "INFO"
                 fi
             else
                 if [ "$block_toggle" = 1 ]; then
-                    abortInstance "- ${blockType} is already unblocked." "main: ${blockType} block is already enabled."
+                    abortInstance "- ${blockType} is already unblocked." "main-rmlwk: ${blockType} block is already enabled."
                 else 
-                    consoleMessage "- Enabling ${blockType} ads block type..." "main: ${blockType} block type enable has been initialized."
+                    consoleMessage "- Enabling ${blockType} ads block type..." "main-rmlwk: ${blockType} block type enable has been initialized." "INFO"
                     blockContent "${blockType}" 1
-                    consoleMessage "- Blocked ${blockType} sites successfully :/" "main: blocked ${blockType} sites."
+                    consoleMessage "- Blocked ${blockType} sites successfully :/" "main-rmlwk: blocked ${blockType} sites." "INFO"
                 fi
             fi
         fi
@@ -624,9 +631,9 @@ case "$(echo "${args}" | awk '{print $1}')" in
         updateStatus
     ;;
     "--whitelist|-w")
-        consoleMessage "\n- Trying to run whitelist actions on given domain(s).." "main: User requested for a domain(s) to get whitelisted."
-        isBlockerPaused && abortInstance "- Adblocker is paused and it cannot be reset. Please resume it before running this action." "main: User tried to whitelist some links white the blocker is paused."
-        isDefaultHosts && abortInstance "- You cannot whitelist links while hosts is reset." "main: User tried to whitelist some links while the hosts is reset."
+        consoleMessage "\n- Trying to run whitelist actions on given domain(s).." "main-rmlwk: User requested for a domain(s) to get whitelisted." "INFO"
+        isBlockerPaused && abortInstance "- Adblocker is paused and it cannot be reset. Please resume it before running this action." "main-rmlwk: User tried to whitelist some links white the blocker is paused."
+        isDefaultHosts && abortInstance "- You cannot whitelist links while hosts is reset." "main-rmlwk: User tried to whitelist some links while the hosts is reset."
         action="$2"
         shift 2
         if [ -z "$action" ] || [ "$#" -ge 3 ] || { [ "$action" != "add" ] && [ "$action" != "remove" ]; }; then
@@ -650,7 +657,7 @@ case "$(echo "${args}" | awk '{print $1}')" in
             
             # Ensure the domain is not already blacklisted
             if grep -Fxq "$host" "$persistantDirectory/blacklist.txt"; then
-                consoleMessage "  Cannot whitelist $rawInput, it already exists in blocklist." "main: User tried to whitelist a domain that exists in blocklist."
+                consoleMessage "  Cannot whitelist $rawInput, it already exists in blocklist." "main-rmlwk: User tried to whitelist a domain that exists in blocklist." "WARN"
                 continue
             fi
             
@@ -710,14 +717,14 @@ case "$(echo "${args}" | awk '{print $1}')" in
                 esac
                 # check if already whitelisted.
                 if grep -qxF "$rawInput" "${persistantDirectory}/whitelist.txt"; then
-                    consoleMessage "  ${rawInput} is already whitelisted." "main: User requested domain cannot be added to the whitelist because it is already in the whitelist domain lists."
+                    consoleMessage "  ${rawInput} is already whitelisted." "main-rmlwk: User requested domain cannot be added to the whitelist because it is already in the whitelist domain lists." "WARN"
                     continue
                 fi
 
                 # Collect matches
                 matchedDomains=$(grep -E "$pattern" "$hostsFile" | awk '{print $2}' | sort -u)
                 if [ -z "$matchedDomains" ]; then
-                    consoleMessage "  No matches found for ${rawInput}" "main: No matches has been found for the user requested whitelist domain."
+                    consoleMessage "  No matches found for ${rawInput}" "main-rmlwk: No matches has been found for the user requested whitelist domain." "WARN"
                     continue
                 fi
 
@@ -735,7 +742,7 @@ case "$(echo "${args}" | awk '{print $1}')" in
                 fi
             
                 # Add matched domains to whitelist file
-                consoleMessage "- Whitelisting ($matchType): $rawInput" "main: Whitelisting ($matchType): $rawInput. Domains: $matchedDomains"
+                consoleMessage "- Whitelisting ($matchType): $rawInput" "main-rmlwk: Whitelisting requested URL..." "INFO"
                 for md in $matchedDomains; do
                     grep -qxF "$md" "$persistantDirectory/whitelist.txt" && echo "$md" >> "$persistantDirectory/whitelist.txt"
                 done
@@ -750,10 +757,10 @@ case "$(echo "${args}" | awk '{print $1}')" in
                 tmpf="$persistantDirectory/.whitelist.sorted.$$"
                 sort -u "$persistantDirectory/whitelist.txt" > "$tmpf" && mv "$tmpf" "$persistantDirectory/whitelist.txt"
                 consoleMessage "- Whitelisted ($matchType): $rawInput"
-                logShit "main: Whitelisted $rawInput ($matchType)."
+                logShit "main-rmlwk: Whitelisted requested URL." "INFO"
             else 
-                logShit "main: Removing $host from whitelist..."
-                grep -Eq "$domRe" "$persistantDirectory/whitelist.txt" || abortInstance "- $host is not found in whitelist." "main: user requested host is not found in the whitelist."
+                logShit "main-rmlwk: Removing requested host from whitelist..." "INFO"
+                grep -Eq "$domRe" "$persistantDirectory/whitelist.txt" || abortInstance "- $host is not found in whitelist." "main-rmlwk: user requested host is not found in the whitelist."
                 tmpf="$persistantDirectory/.whitelist.$$"
                     
                 # Extract entries that are being removed
@@ -767,14 +774,14 @@ case "$(echo "${args}" | awk '{print $1}')" in
                 for re in $removedEntries; do
                     grep -qE "^0\.0\.0\.0[[:space:]]+$re\$" "$hostsFile" || echo -e "\n0.0.0.0 $re" >> "$hostsFile"
                 done
-                consoleMessage "- $host removed from whitelist. Domain(s) are now blocked again." "main: Removed hosts (pattern) from whitelist and re-blocked domains."
+                consoleMessage "- $host removed from whitelist. Domain(s) are now blocked again." "main-rmlwk: Removed hosts (pattern) from whitelist and re-blocked domains." "INFO"
             fi
             consoleMessage " "
         done
     ;;
     "--blocklist|--blacklist|-b")
-        consoleMessage "\n- Trying to run whitelist actions on given domain.." "main: User requested for a domain to get whitelisted."
-        isBlockerPaused && abortInstance "- Adblocker is paused and it cannot be reset. Please resume it before running this action." "main: User tried to blocklist some links white the blocker is paused."
+        consoleMessage "\n- Trying to run whitelist actions on given domain.." "main-rmlwk: User requested for a domain to get whitelisted." "INFO"
+        isBlockerPaused && abortInstance "- Adblocker is paused and it cannot be reset. Please resume it before running this action." "main-rmlwk: User tried to blocklist some links white the blocker is paused."
         option="$2"
         if [ "$option" != "add" ] && [ "$option" != "remove" ]; then
             echo "Usage: rmlwk --blocklist, -b <add/remove> <domain>"
@@ -789,33 +796,33 @@ case "$(echo "${args}" | awk '{print $1}')" in
             
             # Validate domain format
             if ! printf '%s' "$domain" | grep -qiE '^[a-z0-9.-]+\.[a-z]{2,}$'; then
-                consoleMessage "  Invalid domain: $domain" "main: User gave an invaild domain in the blocklist action."
+                consoleMessage "  Invalid domain: $domain" "main-rmlwk: User gave an invaild domain in the blocklist action." "WARN"
                 consoleMessage "- Example valid domain: example.com"
                 continue
             fi
             
             # Ensure the domain is not already whitelisted
             if grep -Fxq "$domain" "$persistantDirectory/whitelist.txt"; then
-                consoleMessage "- Cannot blocklist $domain, it already exists in blocklist." "main: User tried to blocklist a domain that exists in whitelist."
+                consoleMessage "- Cannot blocklist $domain, it already exists in blocklist." "main-rmlwk: User tried to blocklist a domain that exists in whitelist." "WARN"
                 continue
             fi
             
             if [ "$option" = "add" ]; then
                 # Add to hosts file if not already present
-                grep -qE "^0\.0\.0\.0[[:space:]]+$domain\$" "$hostsFile" && abortInstance "- $domain is already blocked" "main: User tried to block a domain that is already blocked."
-                consoleMessage "- Blocklisting $domain..." "main: Trying to add user requested domain to the blocklist.."
+                grep -qE "^0\.0\.0\.0[[:space:]]+$domain\$" "$hostsFile" && abortInstance "- $domain is already blocked" "main-rmlwk: User tried to block a domain that is already blocked."
+                consoleMessage "- Blocklisting $domain..." "main-rmlwk: Trying to add user requested domain to the blocklist.." "INFO"
                     
                 # Add to blacklist.txt if not already there
                 grep -qxF "$domain" "$persistantDirectory/blacklist.txt" || echo "$domain" >> "$persistantDirectory/blacklist.txt"
                     
                 # Ensure newline at end before appending
                 [ -s "$hostsFile" ] && tail -c1 "$hostsFile" | grep -qv $'\n' && echo -e "\n0.0.0.0 $domain" >> "$hostsFile" || echo -e "0.0.0.0 $domain" >> "$hostsFile"
-                consoleMessage "- Added $domain to the hosts file and blocklist." "main: Finished adding requested $domain to the hosts and blocklist file."
+                consoleMessage "- Added $domain to the hosts file and blocklist." "main-rmlwk: Finished adding requested $domain to the hosts and blocklist file." "INFO"
             else
                 # Remove from blacklist.txt and hosts
-                consoleMessage "- Removing $domain from the blocklist..." "main: Trying to remove user requested domain from the blocklist.."
+                consoleMessage "- Removing $domain from the blocklist..." "main-rmlwk: Trying to remove user requested domain from the blocklist.." "INFO"
                 if ! grep -qxF "$domain" "$persistantDirectory/blacklist.txt"; then
-                    consoleMessage "  $domain is not found in blocklist." "main: User requested domain is not found in the blocklist."
+                    consoleMessage "  $domain is not found in blocklist." "main-rmlwk: User requested domain is not found in the blocklist." "WARN"
                     continue
                 fi
                 sed -i "/^$(printf '%s' "$domain" | sed 's/[]\/$*.^|[]/\\&/g')$/d" "$persistantDirectory/blacklist.txt"
@@ -823,7 +830,7 @@ case "$(echo "${args}" | awk '{print $1}')" in
                 grep -vF "0.0.0.0 $domain" "$hostsFile" > "$tmpHosts"
                 cat "$tmpHosts" > "$hostsFile"
                 rm -f "$tmpHosts"
-                consoleMessage "- $domain has been removed from blocklist and unblocked." "main: Removed $domain from the blocklist and unblocked."
+                consoleMessage "- $domain has been removed from blocklist and unblocked." "main-rmlwk: Removed $domain from the blocklist and unblocked." "INFO"
             fi
             consoleMessage " "
         done
@@ -831,50 +838,50 @@ case "$(echo "${args}" | awk '{print $1}')" in
         updateStatus
     ;;
     --custom-source|-c)
-        consoleMessage "\n- Trying to run custom sources actions on given domain.." "main: User requested for a custom source to be managed."
+        consoleMessage "\n- Trying to run custom sources actions on given domain.." "main-rmlwk: User requested for a custom source to be managed." "INFO"
         option="$2"
         if [ "$#" -ge "3" ]; then
             help;
-            abortInstance "- Required arguments are not given" "main: Expected argument style is not met, what we got instead: $clean | $args"
+            abortInstance "- Required arguments are not given" "main-rmlwk: Expected argument style is not met, what we got instead: $clean | $args"
         fi
         if [ "$option" != "add" ] && [ "$option" != "remove" ]; then
             help;
-            abortInstance "- Usage: rmlwk --custom-source <add/remove> <domain>" "main: User gave an invalid option: $option"
+            abortInstance "- Usage: rmlwk --custom-source <add/remove> <domain>" "main-rmlwk: User gave an invalid option: $option"
         fi
         shift 2
         for domain in $@; do
             # Validate URL format (accept http/https)
             if ! printf '%s' "$domain" | grep -qiE '^(https?://[a-z0-9.-]+\.[a-z]{2,}(/.*)?|[a-z0-9.-]+\.[a-z]{2,})$'; then
                 consoleMessage "  Invalid domain: $domain"
-                consoleMessage "- Example valid domain: example.com, https://example.com or https://example.com/hosts.txt" "main: User gave an invalid domain in the custom sources action."
+                consoleMessage "- Example valid domain: example.com, https://example.com or https://example.com/hosts.txt" "main-rmlwk: User gave an invalid domain in the custom sources action." "WARN"
                 continue
             fi
-            consoleMessage "- Trying to $([ "${option}" == "add" ] && echo add || echo remove) $domain into the sources.." "main: trying to $([ "${option}" == "add" ] && echo add || echo remove) user's custom domain in the sources."
+            consoleMessage "- Trying to $([ "${option}" == "add" ] && echo add || echo remove) $domain into the sources.." "main-rmlwk: trying to $([ "${option}" == "add" ] && echo add || echo remove) user's custom domain in the sources." "INFO"
             if [ "$option" = "add" ]; then
                 if grep -qx "$domain" "$persistantDirectory/sources.txt"; then
-                    consoleMessage "- $domain is already in sources." "main: User gave an domain that is already present in the sources."
+                    consoleMessage "- $domain is already in sources." "main-rmlwk: User gave an domain that is already present in the sources." "WARN"
                     continue
                 fi
                 echo "$domain" >> "$persistantDirectory/sources.txt"
-                consoleMessage "- Added $domain to the sources." "main: Added user requested domain to the sources."
+                consoleMessage "- Added $domain to the sources." "main-rmlwk: Added user requested domain to the sources." "INFO"
             else
                 if grep -qx "$domain" "$persistantDirectory/sources.txt"; then
                     sed -i "/^$(printf '%s' "$domain" | sed 's/[]\/$*.^|[]/\\&/g')$/d" "$persistantDirectory/sources.txt"
-                    consoleMessage "- Removed $domain from the sources." "main: Removed user requested domain from the sources."
+                    consoleMessage "- Removed $domain from the sources." "main-rmlwk: Removed user requested domain from the sources." "INFO"
                 else
-                    consoleMessage "- $domain is not found in the sources." "main: Failed to remove user requested domain, maybe it was not even found? Who knows right?"
+                    consoleMessage "- $domain is not found in the sources." "main-rmlwk: Failed to remove user requested domain, maybe it was not even found? Who knows right?" "WARN"
                 fi
             fi
         done
     ;;
     --update-hosts|-u)
-        consoleMessage "\n- Trying to run hosts updater action.." "main: User requested for a hosts update."
-        isBlockerPaused && abortInstance "- Adblocker is paused and it cannot be reset. Please resume it before running this action." "main: User tried to update hosts white the blocker is paused."
+        consoleMessage "\n- Trying to run hosts updater action.." "main-rmlwk: User requested for a hosts update." "INFO"
+        isBlockerPaused && abortInstance "- Adblocker is paused and it cannot be reset. Please resume it before running this action." "main-rmlwk: User tried to update hosts white the blocker is paused."
         combinedFile="${tmpHosts}_all"
         > "$combinedFile"
 
         # download + normalize base hosts
-        consoleMessage "  Fetching base hosts..."
+        consoleMessage "  Fetching base hosts..." "INFO"
         counter=0
         for host in $(grep -Ev '^#|^$' "$persistantDirectory/sources.txt" | sort -u); do
             fetch "${tmpHosts}${counter}" "$host"
@@ -892,7 +899,7 @@ case "$(echo "${args}" | awk '{print $1}')" in
             # download & process only if blocklist is enabled.
             if [ "$enabled" = "1" ]; then
                 mkdir -p "${persistantDirectory}/cache/${bl}"
-                consoleMessage "  Fetching blocklists for $bl type hosts." "main: fetching blocklists for $bl type hosts."
+                consoleMessage "  Fetching blocklists for $bl type hosts." "main-rmlwk: fetching blocklists for $bl type hosts." "INFO"
                 fetch "${cacheHosts}1" "https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/${bl}-only/hosts"
                 if [ "$bl" = "porn" ]; then
                     fetch "${cacheHosts}2" https://raw.githubusercontent.com/johnlouie09/Anti-Porn-HOSTS-File/refs/heads/master/HOSTS.txt
@@ -905,10 +912,10 @@ case "$(echo "${args}" | awk '{print $1}')" in
 
                 # Append only if enabled
                 cat "$persistantDirectory/cache/$bl/hosts"* >> "$combinedFile"
-                consoleMessage "  Finished fetching $bl blocklists " "main: Added $bl blocklist to the combined file."
+                consoleMessage "  Finished fetching $bl blocklists " "main-rmlwk: Added $bl blocklist to the combined file." "INFO"
             fi
         done
-        consoleMessage "  Installing hosts.." "main: Installing downloaded hosts.."
+        consoleMessage "  Installing hosts.." "main-rmlwk: Installing downloaded hosts.." "INFO"
         printf "127.0.0.1 localhost\n::1 localhost" > "${hostsFile}"
         installHosts "all"
         refreshCounts
