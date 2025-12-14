@@ -9,6 +9,9 @@
 # Now enjoy reading the code
 # - ZG089, Founder of Re-Malwack.
 
+# exit the crap if we don't have root privilages BUT WITH 127 AS THE EXIT CODE AHAHHAHAHAHAHAHAHAHAHAHA.
+[ "$(id -u)" != "0" ] && exit 127
+
 # global variables:
 persistantDirectory="/data/adb/Re-Malwack"
 realPath="$(readlink -f "$0")"
@@ -35,7 +38,7 @@ PREVPATH="${PATH}"
 PATH="/data/adb/ap/bin:/data/adb/ksu/bin:/data/adb/magisk:/data/data/com.termux/files/usr/bin:$PREVPATH"
 
 # get values from the config.sh file.
-source "/data/adb/Re-Malwack/config.sh" || . "/data/adb/Re-Malwack/config.sh"
+command -v source &>/dev/null && source "/data/adb/Re-Malwack/config.sh" || . "/data/adb/Re-Malwack/config.sh"
 
 # set `throwOneToTwo` if we got --quiet in the args
 echo "$@" | grep -q "--quiet" && throwOneToTwo=true || throwOneToTwo=false
@@ -120,7 +123,7 @@ function consoleMessage() {
 }
 
 function logShit() {
-    [ -n "$2" ] && echo -e "$2: $1" >> ${thisInstanceLogFile}
+    [ -n "$2" ] && echo -e "$(echo "$2" | tr '[:lower:]' '[:upper:]'): $1" >> "${thisInstanceLogFile}"
 }
 
 function abortInstance() {
