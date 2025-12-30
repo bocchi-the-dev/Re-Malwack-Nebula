@@ -18,22 +18,11 @@ tmp_hosts="/data/local/tmp/hosts"
 version=$(grep '^version=' "$MODDIR/module.prop" | cut -d= -f2-)
 LOGFILE="$persist_dir/logs/Re-Malwack_$(date +%Y-%m-%d_%H%M%S).log"
 
-# ====== Pre-func ======
+# ====== Pre-config ======
 
-# 1 - Check if zygisk host redirect module is enabled
-zn_module_dir="/data/adb/modules/hostsredirect"
-if [ -d "$zn_module_dir" ] && [ ! -f "$zn_module_dir/disable" ]; then
-    is_zn_detected=1
-    hosts_file="/data/adb/hostsredirect/hosts"
-    log_message "Zygisk host redirect module detected, using /data/adb/hostsredirect/hosts as target hosts file"
-else
-    hosts_file="$MODDIR/system/etc/hosts"
-    log_message "Using standard mount method with $MODDIR/system/etc/hosts"
-fi
-
-# 2 - Sourcing config file
+# 1 - Sourcing config file
 . "$persist_dir/config.sh"
-# 3 - creating logs dir in case if not created
+# 2 - creating logs dir in case if not created
 mkdir -p "$persist_dir/logs"
 
 # ====== Functions ======
@@ -95,7 +84,7 @@ function host_process() {
 # Function to count blocked entries and store them
 function refresh_blocked_counts() {
     mkdir -p "$persist_dir/counts"
-
+    log_message INFO "Refreshing blocked entries counts"
     blocked_mod=$(grep -c '^0\.0\.0\.0[[:space:]]' "$hosts_file" 2>/dev/null)
     echo "${blocked_mod:-0}" > "$persist_dir/counts/blocked_mod.count"
 
@@ -164,7 +153,7 @@ function resume_protections() {
 function log_message() {
 
     timestamp() {
-        date +"%m-%d-%Y %I:%M:%S %p"
+        date +"%Y-%m-%d %I:%M:%S %p"
     }
 
     # Handle optional log level (default: INFO)
@@ -262,7 +251,7 @@ function install_hosts() {
     # In case of hosts update (since only combined file exists only on --update-hosts)
     if [ -f "$combined_file" ]; then
         log_message "Detected unified hosts, sorting..."
-        cat "${tmp_hosts}0" >> "$combined_file" 
+        cat "${tmp_hosts}0" >> "$combined_file"
         awk '!seen[$0]++' "$combined_file" > "${tmp_hosts}merged.sorted"
     else # In case of install_hosts() being called in block_content() or block_trackers()
         log_message "detected multiple hosts file, merging and sorting... (Blocklist toggles only)"
@@ -323,9 +312,14 @@ function block_content() {
             nuke_if_we_dont_have_internet
             fetch "${cache_hosts}1" "https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/${block_type}-only/hosts"
             [ "$block_type" = "porn" ] && {
-                fetch "${cache_hosts}2" https://raw.githubusercontent.com/johnlouie09/Anti-Porn-HOSTS-File/refs/heads/master/HOSTS.txt &
+
                 fetch "${cache_hosts}3" https://raw.githubusercontent.com/Sinfonietta/hostfiles/refs/heads/master/pornography-hosts &
                 fetch "${cache_hosts}4" https://raw.githubusercontent.com/columndeeply/hosts/refs/heads/main/safebrowsing &
+                fetch "${cache_hosts}5" https://blocklistproject.github.io/Lists/porn.txt &
+                wait
+            }
+            [ "$block_type" = "gambling"] && {
+                fetch "${cache_hosts}2" https://blocklistproject.github.io/Lists/gambling.txt &
                 wait
             }
             # Stage cache to tmp then install
@@ -341,9 +335,13 @@ function block_content() {
             echo "[*] Downloading hosts for $block_type block."
             fetch "${cache_hosts}1" "https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/${block_type}-only/hosts"
             [ "$block_type" = "porn" ] && {
-                fetch "${cache_hosts}2" https://raw.githubusercontent.com/johnlouie09/Anti-Porn-HOSTS-File/refs/heads/master/HOSTS.txt &
-                fetch "${cache_hosts}3" https://raw.githubusercontent.com/Sinfonietta/hostfiles/refs/heads/master/pornography-hosts &
-                fetch "${cache_hosts}4" https://raw.githubusercontent.com/columndeeply/hosts/refs/heads/main/safebrowsing &
+                fetch "${cache_hosts}2" https://raw.githubusercontent.com/Sinfonietta/hostfiles/refs/heads/master/pornography-hosts &
+                fetch "${cache_hosts}3" https://raw.githubusercontent.com/columndeeply/hosts/refs/heads/main/safebrowsing &
+                fetch "${cache_hosts}4" https://blocklistproject.github.io/Lists/porn.txt &
+                wait
+            }
+            [ "$block_type" = "gambling"] && {
+                fetch "${cache_hosts}2" https://blocklistproject.github.io/Lists/gambling.txt &
                 wait
             }
             for file in "$persist_dir/cache/$block_type/hosts"*; do
@@ -399,6 +397,7 @@ function block_trackers() {
             log_message WARN "No cached trackers blocklist file found for $brand device, redownloading before removal."
             echo "[!] No cached trackers blocklist file(s) found for $brand device, redownloading before removal."
             fetch "${cache_hosts}1" "https://raw.githubusercontent.com/r-a-y/mobile-hosts/refs/heads/master/AdguardTracking.txt"
+            fetch "${cache_hosts}2" "https://blocklistproject.github.io/Lists/tracking.txt"
             case "$brand" in
                 xiaomi|redmi|poco) url="https://raw.githubusercontent.com/hagezi/dns-blocklists/main/hosts/native.xiaomi.txt" ;;
                 samsung) url="https://raw.githubusercontent.com/hagezi/dns-blocklists/main/hosts/native.samsung.txt" ;;
@@ -428,6 +427,7 @@ function block_trackers() {
             log_message "Fetching trackers block hosts for $brand"
             echo "[*] Fetching trackers block files for $brand"
             fetch "${cache_hosts}1" "https://raw.githubusercontent.com/r-a-y/mobile-hosts/refs/heads/master/AdguardTracking.txt"
+            fetch "${cache_hosts}2" "https://blocklistproject.github.io/Lists/tracking.txt"
             case "$brand" in
                 xiaomi|redmi|poco) url="https://raw.githubusercontent.com/hagezi/dns-blocklists/main/hosts/native.xiaomi.txt" ;;
                 samsung) url="https://raw.githubusercontent.com/hagezi/dns-blocklists/main/hosts/native.samsung.txt" ;;
@@ -474,10 +474,9 @@ function nuke_if_we_dont_have_internet() {
 # tmp_hosts 1-9 = This is the downloaded hosts, to simplify process of install and remove function.
 function fetch() {
     start_time=$(date +%s)
-    PATH=/data/adb/ap/bin:/data/adb/ksu/bin:/data/adb/magisk:/data/data/com.termux/files/usr/bin:$PATH
     local output_file="$1"
     local url="$2"
-
+    PATH=/data/adb/ap/bin:/data/adb/ksu/bin:/data/adb/magisk:/data/data/com.termux/files/usr/bin:$PATH
     # Curly hairyyy- *ahem*
     # So uhh, we check for curl existence, if it exists then we gotta use it to fetch hosts
     if command -v curl >/dev/null 2>&1; then
@@ -501,6 +500,7 @@ function fetch() {
 
 # Updates module status, modifying module description in module.prop
 function update_status() {
+    status_msg=""  # Reset status message
     log_message "Updating module status"
     start_time=$(date +%s)
     log_message "Fetching last hosts file update"
@@ -559,7 +559,9 @@ function update_status() {
                 echo "[!!!] Critical Error Detected (Hosts Mount Failure). Please check your root manager settings and disable any conflicted module(s)."
                 echo "[!!!] Module hosts blocks $blocked_mod domains, System hosts blocks none."
             fi
-        else
+        fi
+        # Set success message if not set to error
+        if [ -z "$status_msg" ]; then
             status_msg="Status: Protection is enabled ✅ | Blocking $blocked_mod domains"
             [ "$blacklist_count" -gt 0 ] && status_msg="Status: Protection is enabled ✅ | Blocking $((blocked_mod - blacklist_count)) domains + $blacklist_count (blacklist)"
             [ "$whitelist_count" -gt 0 ] && status_msg="$status_msg | Whitelist: $whitelist_count"
@@ -631,26 +633,37 @@ function disable_cron() {
     fi
 }
 
-# Now enough functions and variables, Let's start the real work 😎
+# ===== Pre-main logic =====
 
-# Trigger force stats refresh on WebUI
+# 1 - Check if zygisk host redirect module is enabled
+zn_module_dir="/data/adb/modules/hostsredirect"
+if [ -d "$zn_module_dir" ] && [ ! -f "$zn_module_dir/disable" ]; then
+    is_zn_detected=1
+    hosts_file="/data/adb/hostsredirect/hosts"
+    log_message "Zygisk host redirect module detected, using /data/adb/hostsredirect/hosts as target hosts file"
+else
+    hosts_file="$MODDIR/system/etc/hosts"
+    log_message "Using standard mount method with $MODDIR/system/etc/hosts"
+fi
+
+# 2 - Trigger force stats refresh on WebUI
 if [ "$WEBUI" = "true" ]; then
     refresh_blocked_counts
     update_status
 fi
-#### Error logging lore
+# 3 -Error logging lore
 
-# 1 - Log errors
+# 3.1 - Log errors
 exec 2>>"$LOGFILE"
 
-# 2 - Trap runtime errors (logs failing command + exit code)
+# 3.2 - Trap runtime errors (logs failing command + exit code)
 trap '
 err_code=$?
 timestamp=$(date +"%Y-%m-%d %I:%M:%S %p")
 echo "[$timestamp] - [ERROR] - Command \"$BASH_COMMAND\" failed at line $LINENO (exit code: $err_code)" >> "$LOGFILE"
 ' ERR
 
-# 3 - Trap final script exit
+# 3.3 - Trap final script exit
 trap '
 exit_code=$?
 timestamp=$(date +"%Y-%m-%d %I:%M:%S %p")
@@ -670,7 +683,7 @@ esac
 [ $exit_code -ne 0 ] && echo "[$timestamp] - [ERROR] - $msg at line $LINENO (exit code: $exit_code)" >> "$LOGFILE"
 ' EXIT
 
-# Check for --quiet argument
+# 4- Check for --quiet argument
 for arg in "$@"; do
     if [ "$arg" = "--quiet" ]; then
         quiet_mode=1
@@ -678,12 +691,28 @@ for arg in "$@"; do
     fi
 done
 
-# Show banner if not running from Magisk Manager / quiet mode is disabled
+# 5 - Show banner if not running from Magisk Manager / quiet mode is disabled
 [ -z "$MAGISKTMP" ] && [ "$quiet_mode" = 0 ] && rmlwk_banner
 
-# Log Module Version
+# 6 - Log Module Version
 log_message "Running Re-Malwack version $version"
 
+# 6.1 Log enabled blocklists
+enabled_blocklists=""
+for bl in porn gambling fakenews social; do
+    eval enabled=\$block_${bl}
+    if [ "$enabled" = "1" ]; then
+        enabled_blocklists="$enabled_blocklists $bl"
+    fi
+done
+if [ "$block_trackers" = "1" ]; then
+    enabled_blocklists="$enabled_blocklists trackers"
+fi
+if [ -n "$enabled_blocklists" ]; then
+    log_message INFO "Enabled blocklists:$enabled_blocklists"
+else
+    log_message INFO "No blocklists enabled"
+fi
 # ====== Main Logic ======
 case "$(tolower "$1")" in
     --adblock-switch|-as)
@@ -775,6 +804,10 @@ case "$(tolower "$1")" in
             echo "[i] Usage: rmlwk --whitelist|-w <add|remove> [domain2] [domain3] ..."
             echo "[i] Examples:"
             echo "  rmlwk -w add example.com           # Add domain to the whitelist"
+            echo "  rmlwk --whitelist add *.example.com # Add subdomain wildcard to whitelist"
+            echo "  rmlwk -w add *something            # Add suffix wildcard to whitelist"
+            echo "  rmlwk --whitelist add something*   # Add prefix wildcard to whitelist"
+            echo "  rmlwk --whitelist remove example.com # Remove domain from whitelist"
             echo "  rmlwk -w remove domain1.com domain2.com domain3.com # Remove multiple domains from whitelist"
             display_whitelist=$(cat "$persist_dir/whitelist.txt" 2>/dev/null)
             [ -n "$display_whitelist" ] && echo -e "Current whitelist:\n$display_whitelist" || echo "Current whitelist: no saved whitelist"
@@ -1238,16 +1271,15 @@ case "$(tolower "$1")" in
               log_message "Fetching blocklist: $bl"
               fetch "${cache_hosts}1" "https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/${bl}-only/hosts"
               if [ "$bl" = "porn" ]; then
-                  fetch "${cache_hosts}2" https://raw.githubusercontent.com/johnlouie09/Anti-Porn-HOSTS-File/refs/heads/master/HOSTS.txt &
-                  fetch "${cache_hosts}3" https://raw.githubusercontent.com/Sinfonietta/hostfiles/refs/heads/master/pornography-hosts &
-                  fetch "${cache_hosts}4" https://raw.githubusercontent.com/columndeeply/hosts/refs/heads/main/safebrowsing &
+                  fetch "${cache_hosts}2" https://raw.githubusercontent.com/Sinfonietta/hostfiles/refs/heads/master/pornography-hosts &
+                  fetch "${cache_hosts}3" https://raw.githubusercontent.com/columndeeply/hosts/refs/heads/main/safebrowsing &
                   wait
               fi
               # Process downloaded hosts
               for file in "$persist_dir/cache/$bl/hosts"*; do
                   [ -f "$file" ] && host_process "$file"
               done
-          
+
               # Append only if enabled
               cat "$persist_dir/cache/$bl/hosts"* >> "$combined_file"
               echo "[✓] Fetched $bl blocklist"
@@ -1297,15 +1329,15 @@ case "$(tolower "$1")" in
         echo "--update-hosts, -u: Update the hosts file."
         echo "--auto-update, -a <enable|disable>: Toggle auto hosts update."
         echo "--custom-source, -c <add|remove> <domain1> [domain2] ...: Add/remove custom hosts sources."
-        echo "--reset, -r: Restore original hosts file."
-        echo "--adblock-switch, -as: Toggle protections on/off"
+        echo "--reset, -r: Reset hosts file to default."
+        echo "--adblock-switch, -as: Toggle protections on/off."
         echo "--block-trackers, -bt <disable>, block trackers, use disable to unblock."
         echo "--block-porn, -bp <disable>: Block pornographic sites, use disable to unblock."
         echo "--block-gambling, -bg <disable>: Block gambling sites, use disable to unblock."
         echo "--block-fakenews, -bf <disable>: Block fake news sites, use disable to unblock."
         echo "--block-social, -bs <disable>: Block social media sites, use disable to unblock."
-        echo "--whitelist, -w <add|remove> <domain|pattern> [IP] [domain2] ...: Whitelist domain(s) with optional IP."
-        echo "--blacklist, -b <add|remove> <domain1> [domain2] ...: Blacklist domain(s)."
+        echo "--whitelist, -w <add|remove> <domain|pattern> <domain2> ...: Whitelist domain(s), only whitelist one domain at a time, otherwise use wildcard or use multiple domains in case of unwhitelisting."
+        echo "--blacklist, -b <add|remove> <domain1> <domain2> ...: Blacklist domain(s)."
         echo "--help, -h: Display help."
         echo -e "\033[0;31m Example command: su -c rmlwk --update-hosts\033[0m"
         ;;

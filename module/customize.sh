@@ -1,17 +1,17 @@
-ui_print "    ____             __  ___      __                    __            "
-ui_print "   / __ \___        /  |/  /___ _/ /      ______ ______/ /__          "
-ui_print "  / /_/ / _ \______/ /|_/ / __ \`/ / | /| / / __ \`/ ___/ //_/"       
-ui_print " / _, _/  __/_____/ /  / / /_/ / /| |/ |/ / /_/ / /__/ ,<             "
-ui_print "/_/ |_|\___/     /_/  /_/\__,_/_/ |__/|__/\__,_/\___/_/|_|           "
+ui_print '           ____            __         __  '
+ui_print '          / __ \____ ___  / /      __/ /__'
+ui_print '         / /_/ / __ `__ \/ / | /| / / //_/'
+ui_print '        / _, _/ / / / / / /| |/ |/ / ,<   '
+ui_print '       /_/ |_/_/ /_/ /_/_/ |__/|__/_/|_|  '                   
 ui_print " "
-ui_print "          Welcome to Re-Malwack installation wizard!               "
+ui_print "   Welcome to Re-Malwack installation wizard!"
 sleep 0.2
 ui_print ""
 ui_print " ----------------------------------"
 ui_print "                                   \ "
 ui_print ""
 sleep 0.2
-ui_print "- ⚙ Module Version: $(grep_prop version $MODPATH/module.prop)"
+ui_print "- ⚙️ Module Version: $(grep_prop version $MODPATH/module.prop)"
 sleep 0.2
 ui_print "- 📱 Device Brand: $(getprop ro.product.brand)"
 sleep 0.2
@@ -19,7 +19,7 @@ ui_print "- 📱 Device Model: $(getprop ro.product.model)"
 sleep 0.2
 ui_print "- 🤖 Android Version: $(getprop ro.build.version.release)"
 sleep 0.2
-ui_print "- ⚙ Device Arch: $(getprop ro.product.cpu.abi)"
+ui_print "- 🏹 Device Arch: $(getprop ro.product.cpu.abi)"
 sleep 0.2
 ui_print "- 🛠 Kernel version: $(uname -r)"
 sleep 0.2
@@ -61,7 +61,7 @@ persistent_dir="/data/adb/Re-Malwack"
 config_file="$persistent_dir/config.sh"
 mkdir -p "$persistent_dir"
 touch "$config_file"
-for type in block_porn block_gambling block_fakenews block_social block_trackers daily_update adblock_switch enable_daemon; do
+for type in block_porn block_gambling block_fakenews block_social block_trackers daily_update adblock_switch; do
     grep -q "^$type=" "$config_file" || echo "$type=0" >> "$config_file"
 done
 
@@ -90,9 +90,11 @@ if [ ! -s "$persistent_dir/sources.txt" ]; then
 else
     rm -f $MODPATH/common/sources.txt
     # update sources
-    sed -i 's|https://raw.githubusercontent.com/hagezi/dns-blocklists/main/hosts/pro.plus.txt|https://raw.githubusercontent.com/hagezi/dns-blocklists/main/hosts/pro.txt|' $persistent_dir/sources.txt
+    sed -i 's|https://raw.githubusercontent.com/hagezi/dns-blocklists/main/hosts/pro.plus-compressed.txt|https://raw.githubusercontent.com/hagezi/dns-blocklists/main/hosts/pro.txt|' $persistent_dir/sources.txt
     sed -i 's|https://o0.pages.dev/Pro/hosts.txt|https://badmojr.github.io/1Hosts/Lite/hosts.txt|' $persistent_dir/sources.txt
     add_url_if_not_exists "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/hosts/native.tiktok.txt"
+    add_url_if_not_exists "https://hosts.rem01gaming.dev/adblock"
+    add_url_if_not_exists "https://blocklistproject.github.io/Lists/ads.txt"
 fi
 
 # Initialize

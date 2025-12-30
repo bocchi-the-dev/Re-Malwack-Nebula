@@ -161,14 +161,21 @@ body.input-focused {
 }
 
 .festival {
-    display: block;
-    position: absolute;
+    display: none;
+    position: fixed;
+    left: 0;
     top: 0;
+    width: 100%;
+    z-index: -1;
 }
 
 .festival img {
     width: 100%;
     height: auto;
+}
+
+.festival.show {
+    display: block;
 }
 
 .about {

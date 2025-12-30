@@ -4,7 +4,7 @@
 </div>
 <h2 align="center">Not just a normal ad-blocker module ✨</h2>
 
-[![Module Version](https://img.shields.io/badge/Module_Version-v6.0-44cc11?style=for-the-badge)](https://github.com/ZG089/Re-Malwack/releases/tag/v6.0)
+[![Module Version](https://img.shields.io/badge/Module_Version-v7.0-44cc11?style=for-the-badge)](https://github.com/ZG089/Re-Malwack/releases/tag/v7.0)
 [![Download](https://img.shields.io/github/downloads/ZG089/Re-Malwack/total?style=for-the-badge&cacheSeconds=2)](https://github.com/ZG089/Re-Malwack/releases)
 [![XDA Support thread](https://img.shields.io/badge/XDA_Support_thread-252850?style=for-the-badge&color=gray&logo=xdadevelopers)](https://xdaforums.com/t/re-malwack-revival-of-malwack-module.4690049/)
 [![Telegram Support group](https://img.shields.io/badge/Telegram_Support_Group-Re--Malwack_Community-252850?style=for-the-badge&color=blue&logo=telegram)](https://t.me/Re_Malwack)
@@ -39,16 +39,25 @@
 ## Features // What makes this module special?
 
 - ⛔ It blocks ads, malware and trackers By default, you can also block p*rn sites, fake news sites, gambling sites and social sites
-- ⚙ Allows you to modify and manage hosts file (whitelist/blacklist urls, reset hosts, auto update adblock)
-- 🤙 Allows you to add custom hosts sources, also modify default ones [*]
+- ⚙ Allows you to modify and manage hosts file (whitelist & blacklist urls, reset hosts, auto update adblock)
+- 🎨 Allows you to add custom hosts sources, also modify default ones [*]
+- 💫 Supprts [wildcarded whitelisting](https://github.com/ZG089/Re-Malwack/blob/c09063e46b42ecb36b6b288f6382a2fcb29d4a19/changelog.md?plain=1#L94)
+- 🧰 An elegant, yet simple WebUI (Thanks to [@KOWX712](https://github.com/KOWX712) for his Awesome work)
+- ⏸ Ability to pause/resume adblock without disabling the module
+- ⛑ Can handle hosts mounts by itself
 - ✨ Easy to use, Just set and forget!
-- 🛠 Supports Magisk (and its variants), KernelSU (and its variants) and Apatch
+- 📦 Supports [zn-hostsredirect](https://github.com/aviraxp/ZN-hostsredirect/)
+- 🧲 Ability to import your adblock setup from AdAway, bindhosts, and Cubic-Adblock (Please refer to [this page](https://github.com/ZG089/Re-Malwack/blob/c09063e46b42ecb36b6b288f6382a2fcb29d4a19/changelog.md?plain=1#L89) to get to know what can be imported exactly from those ad-block solutions)
+- 📝 A detailed logging system to debug module behavior and to detect bugs
+- 🛠 Supports Magisk, APatch and KernelSU (and their variants)
 - 👀 Also can protect [non-root devices](https://github.com/ZG089/Re-Malwack/tree/main?tab=readme-ov-file#3-local-vpn-no-root)
 - 🔧 Regularly maintained & updated
 - ❤ Made with love and care
 
 > [!CAUTION]
 > **[*] Please avoid adding hosts sources that blocks urls via `127.0.0.1` instead of `0.0.0.0`, some critical problems might happen in module basic functionality if you do this**
+> **Also avoid using other types of adblock files, _only adblock files in hosts format (Linux/Windows) are accepted_** 
+
 ## Requirements
 
 > [!IMPORTANT]
@@ -56,7 +65,8 @@
 > - Mid-Range or high-end device.
 
 > [!CAUTION]
-> **Do not use this module with any other ad blocker module/app, such as AdAway and Magisk's built-in systemless hosts module.**
+> - **Do not use this module with any other ad blocker module/app, such as AdAway and Magisk's built-in systemless hosts module.**
+> - **Also, In case module is activated but ads are not blocked in browsers such as chrome, Please enable superuser mode for target browser app then check again**
 
 ## How to use Re-Malwack
 
@@ -65,23 +75,26 @@
 - Type``su -c rmlwk`` terminal to show up the next help message which will clarify how to use it:
 
 ```sh
- "Usage: rmlwk [--argument]"
-         "--update-hosts, -u: Update the hosts file."
-         "--auto-update, -a <enable|disable>: Toggle auto hosts update."
-         "--custom-source, -c <add|remove> <domain>: Add custom hosts source."
-         "--reset, -r: Restore original hosts file."
-         "--block-porn, -bp <disable>: Block pornographic sites, use disable to unblock."
-         "--block-gambling, -bg <disable>: Block gambling sites, use disable to unblock."
-         "--block-fakenews, -bf <disable>: Block fake news sites, use disable to unblock."
-         "--block-social, -bs <disable>: Block social media sites, use disable to unblock."
-         "--whitelist, -w <add|remove> <domain>: Whitelist a domain."
-         "--blacklist, -b <add|remove> <domain>: Blacklist a domain."
-         "--help, -h: Display help."
+        [i] Usage: rmlwk [--argument] OPTIONAL: [--quiet]
+         --update-hosts, -u: Update the hosts file.
+         --auto-update, -a <enable|disable>: Toggle auto hosts update.
+         --custom-source, -c <add|remove> <domain1> [domain2] ...: Add/remove custom hosts sources.
+         --reset, -r: Reset hosts file to default.
+         --adblock-switch, -as: Toggle protections on/off.
+         --block-trackers, -bt <disable>, block trackers, use disable to unblock.
+         --block-porn, -bp <disable>: Block pornographic sites, use disable to unblock.
+         --block-gambling, -bg <disable>: Block gambling sites, use disable to unblock.
+         --block-fakenews, -bf <disable>: Block fake news sites, use disable to unblock.
+         --block-social, -bs <disable>: Block social media sites, use disable to unblock.
+         --whitelist, -w <add|remove> <domain|pattern> <domain2> ...: Whitelist domain(s), only whitelist one domain at a time, otherwise use wildcard or use multiple domains in case of unwhitelisting.
+         --blacklist, -b <add|remove> <domain1> <domain2> ...: Blacklist domain(s).
+         --help, -h: Display help.
+        Example command: su -c rmlwk --update-hosts
 ```
 
 ### Option 2 - Via WebUI
 
-- Re-Malwack's WebUI can be accesed using [KSU](https://github.com/tiann/KernelSU), [KSUWebUIStandalone](https://github.com/5ec1cff/KsuWebUIStandalone), [Apatch](https://github.com/bmax121/APatch) and [MMRL](https://github.com/DerGoogler/MMRL)
+- Re-Malwack's WebUI can be accesed using [KSU](https://github.com/tiann/KernelSU), [5ec1cff's KSUWebUIStandalone](https://github.com/5ec1cff/KsuWebUIStandalone)/[KOW's Fork of KSUWebUIStandalone](https://github.com/KOWX712/KsuWebUIStandalone), [Apatch](https://github.com/bmax121/APatch) and [MMRL](https://github.com/DerGoogler/MMRL)
 
 ### Option 3 - Local VPN (no root)
 
@@ -92,7 +105,7 @@
   ```
 
 > [!NOTE]
-> Default hosts sources used in the hosts are: StevenBlack, Hagezi Pro+, 1hosts, and AdGuard's DNS, MobileSpyware block and MobileAds block.
+> Default hosts sources used in the hosts can be found [here](https://github.com/ZG089/Re-Malwack/blob/main/module/common/sources.txt)
 
 ## Download
 
@@ -149,6 +162,7 @@
 - [@StevenBlack](https://github.com/StevenBlack)
 - [@r-a-y](https://github.com/r-a-y)
 - [@Rem01Gaming](https://github.com/Rem01Gaming)
+- [@blocklistproject](https://github.com/blocklistproject)
 
 ### 3 - Foundational Supporters
 
