@@ -11,12 +11,14 @@
 quiet_mode=0
 is_zn_detected=0
 persist_dir="/data/adb/Re-Malwack"
+zn_module_dir="/data/adb/modules/hostsredirect"
 REALPATH=$(readlink -f "$0")
 MODDIR=$(dirname "$REALPATH")
 system_hosts="/system/etc/hosts"
 tmp_hosts="/data/local/tmp/hosts"
 version=$(grep '^version=' "$MODDIR/module.prop" | cut -d= -f2-)
 LOGFILE="$persist_dir/logs/Re-Malwack_$(date +%Y-%m-%d_%H%M%S).log"
+FALLBACK_SCRIPT="$persist_dir/auto_update_fallback.sh"
 
 # ====== Pre-config ======
 
@@ -76,19 +78,18 @@ function host_process() {
     local file="$1"
     # Exclude whitelist files
     echo "$file" | tr '[:upper:]' '[:lower:]' | grep -q "whitelist" && return 0
-    # Unified filtration: remove comments, empty lines, trim whitespaces, handles windows-formatted hosts and collapses all multiple spaces/tabs into a single space
+    # Unified filtration: remove comments, empty lines, trim whitespaces, handles windows-formatted hosts, collapses all multiple spaces/tabs into a single space and converts 127.0.0.1 to 0.0.0.0
     log_message "Filtering $file..."
-    sed -i '/^[[:space:]]*#/d; s/[[:space:]]*#.*$//; /^[[:space:]]*$/d; s/^[[:space:]]*//; s/[[:space:]]*$//; s/\r$//; s/[[:space:]]\+/ /g' "$file"
+    sed -i '/^[[:space:]]*#/d; s/[[:space:]]*#.*$//; /^[[:space:]]*$/d; s/^[[:space:]]*//; s/[[:space:]]*$//; s/\r$//; s/[[:space:]]\+/ /g; s/127.0.0.1/0.0.0.0/g' "$file"
 }
 
 # Function to count blocked entries and store them
 function refresh_blocked_counts() {
     mkdir -p "$persist_dir/counts"
-
-    blocked_mod=$(grep -c '^0\.0\.0\.0[[:space:]]' "$hosts_file" 2>/dev/null)
+    log_message INFO "Refreshing blocked entries counts"
+    blocked_mod=$(grep -c "0.0.0.0" $hosts_file)
     echo "${blocked_mod:-0}" > "$persist_dir/counts/blocked_mod.count"
-
-    blocked_sys=$(grep -c '^0\.0\.0\.0[[:space:]]' "$system_hosts" 2>/dev/null)
+    blocked_sys=$(grep -c "0.0.0.0" $system_hosts)
     echo "${blocked_sys:-0}" > "$persist_dir/counts/blocked_sys.count"
 }
 
@@ -96,7 +97,7 @@ function refresh_blocked_counts() {
 
 # function to check adblock pause
 function is_protection_paused() {
-    [ -f "$persist_dir/hosts.bak" ] || [ "$adblock_switch" -eq 1 ]
+    [ -f "$persist_dir/hosts.bak" ] || return 1
 }
 
 # 1 - Pause adblock
@@ -143,9 +144,9 @@ function resume_protections() {
         sleep 0.5
         echo "[i] Force resuming protection and running hosts update as a fallback action"
         nuke_if_we_dont_have_internet
-        sleep 3
+        sleep 2
         sed -i 's/^adblock_switch=.*/adblock_switch=0/' "/data/adb/Re-Malwack/config.sh"
-        exec "$0" --update-hosts
+        exec "$0" --quiet --update-hosts
     fi
 }
 
@@ -153,7 +154,7 @@ function resume_protections() {
 function log_message() {
 
     timestamp() {
-        date +"%m-%d-%Y %I:%M:%S %p"
+        date +"%Y-%m-%d %I:%M:%S %p"
     }
 
     # Handle optional log level (default: INFO)
@@ -184,6 +185,60 @@ function log_duration() {
     end_time=$(date +%s)
     duration=$((end_time - start_time))
     log_message "$name took $(duration_to_hms $duration) (hh:mm:ss)"
+}
+
+# Function to query domain status in hosts file
+function query_domain() {
+    local domain="$1"
+
+    if [ -z "$domain" ]; then
+        echo "[!] No domain provided."
+        echo "[i] Usage: rmlwk --query-domain <domain> or rmlwk -q <domain>"
+        echo "[i] Example: rmlwk --query-domain example.com"
+        exit 1
+    fi
+
+    # Sanitize input - extract domain from URL if needed
+    if printf '%s' "$domain" | grep -qE '^https?://'; then
+        domain=$(printf '%s' "$domain" | awk -F[/:] '{print $4}')
+    fi
+
+    # Validate domain format
+    if ! printf '%s' "$domain" | grep -qiE '^[a-z0-9]([a-z0-9-]*\.)*[a-z0-9-]*[a-z0-9]$|^[a-z0-9]$'; then
+        abort "[!] Invalid domain format: $domain"
+    fi
+
+    log_message "Querying domain: $domain"
+
+    # Search in hosts file for the domain
+    # This will find lines like "0.0.0.0 example.com" or "127.0.0.1 example.com"
+    entry=$(grep -E "^([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+|[0-9a-fA-F:]+)[[:space:]]+${domain}([[:space:]]|$)" "$hosts_file" 2>/dev/null | head -1)
+
+    if [ -z "$entry" ]; then
+        echo "[i] Domain '$domain' is NOT blocked"
+        log_message "Domain query result: $domain is NOT blocked"
+        return 0
+    fi
+
+    # Extract the IP address from the entry
+    ip=$(echo "$entry" | awk '{print $1}')
+
+    # Check if it's a blocking IP
+    case "$ip" in
+        0.0.0.0)
+            echo "[!] Domain '$domain' IS BLOCKED"
+            echo "[i] IP: $ip"
+            log_message "Domain query result: $domain IS BLOCKED with IP $ip"
+            return 0
+            ;;
+        *)
+            # If it's a different IP, it's redirected
+            echo "[⟳] Domain '$domain' IS REDIRECTED"
+            echo "[i] Redirected to IP: $ip"
+            log_message "Domain query result: $domain IS REDIRECTED to IP $ip"
+            return 0
+            ;;
+    esac
 }
 
 # Functions to process hosts
@@ -219,7 +274,7 @@ function install_hosts() {
     log_message "Processing Whitelist..."
     whitelist_file="$persist_dir/cache/whitelist/whitelist.txt"
 
-    if [ "$block_social" -eq 0 ]; then
+    if [ "$block_social" -eq 0 ] && [ "$type" != "social" ]; then
         whitelist_file="$whitelist_file $persist_dir/cache/whitelist/social_whitelist.txt"
     else
         log_message WARN "Social Block triggered, Social whitelist won't be applied"
@@ -251,7 +306,7 @@ function install_hosts() {
     # In case of hosts update (since only combined file exists only on --update-hosts)
     if [ -f "$combined_file" ]; then
         log_message "Detected unified hosts, sorting..."
-        cat "${tmp_hosts}0" >> "$combined_file" 
+        cat "${tmp_hosts}0" >> "$combined_file"
         awk '!seen[$0]++' "$combined_file" > "${tmp_hosts}merged.sorted"
     else # In case of install_hosts() being called in block_content() or block_trackers()
         log_message "detected multiple hosts file, merging and sorting... (Blocklist toggles only)"
@@ -310,13 +365,13 @@ function block_content() {
             log_message WARN "No cached $block_type blocklist found, redownloading to disable properly."
             echo "[!] No cached $block_type blocklist found, redownloading to disable properly"
             nuke_if_we_dont_have_internet
-            fetch "${cache_hosts}1" "https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/${block_type}-only/hosts"
-            [ "$block_type" = "porn" ] && {
-                fetch "${cache_hosts}2" https://raw.githubusercontent.com/johnlouie09/Anti-Porn-HOSTS-File/refs/heads/master/HOSTS.txt &
-                fetch "${cache_hosts}3" https://raw.githubusercontent.com/Sinfonietta/hostfiles/refs/heads/master/pornography-hosts &
-                fetch "${cache_hosts}4" https://raw.githubusercontent.com/columndeeply/hosts/refs/heads/main/safebrowsing &
-                wait
-            }
+            fetch_blocklist "$block_type"
+
+            # Process downloaded hosts
+            for file in "$persist_dir/cache/$block_type/hosts"*; do
+                [ -f "$file" ] && host_process "$file"
+            done
+
             # Stage cache to tmp then install
             stage_blocklist_files "$block_type"
             install_hosts "$block_type"
@@ -328,13 +383,8 @@ function block_content() {
         if [ ! -f "${cache_hosts}1" ] || [ "$status" = "update" ]; then
             nuke_if_we_dont_have_internet
             echo "[*] Downloading hosts for $block_type block."
-            fetch "${cache_hosts}1" "https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/${block_type}-only/hosts"
-            [ "$block_type" = "porn" ] && {
-                fetch "${cache_hosts}2" https://raw.githubusercontent.com/johnlouie09/Anti-Porn-HOSTS-File/refs/heads/master/HOSTS.txt &
-                fetch "${cache_hosts}3" https://raw.githubusercontent.com/Sinfonietta/hostfiles/refs/heads/master/pornography-hosts &
-                fetch "${cache_hosts}4" https://raw.githubusercontent.com/columndeeply/hosts/refs/heads/main/safebrowsing &
-                wait
-            }
+            fetch_blocklist "$block_type"
+            # Process downloaded hosts
             for file in "$persist_dir/cache/$block_type/hosts"*; do
                 [ -f "$file" ] && host_process "$file"
             done
@@ -387,17 +437,10 @@ function block_trackers() {
             nuke_if_we_dont_have_internet
             log_message WARN "No cached trackers blocklist file found for $brand device, redownloading before removal."
             echo "[!] No cached trackers blocklist file(s) found for $brand device, redownloading before removal."
-            fetch "${cache_hosts}1" "https://raw.githubusercontent.com/r-a-y/mobile-hosts/refs/heads/master/AdguardTracking.txt"
-            case "$brand" in
-                xiaomi|redmi|poco) url="https://raw.githubusercontent.com/hagezi/dns-blocklists/main/hosts/native.xiaomi.txt" ;;
-                samsung) url="https://raw.githubusercontent.com/hagezi/dns-blocklists/main/hosts/native.samsung.txt" ;;
-                oppo|realme) url="https://raw.githubusercontent.com/hagezi/dns-blocklists/main/hosts/native.oppo-realme.txt" ;;
-                vivo) url="https://raw.githubusercontent.com/hagezi/dns-blocklists/main/hosts/native.vivo.txt" ;;
-                huawei) url="https://raw.githubusercontent.com/hagezi/dns-blocklists/main/hosts/native.huawei.txt" ;;
-                *) url="" ;;
-            esac
-            host_process "${cache_hosts}1"
-            [ -n "$url" ] && fetch "${cache_hosts}2" "$url" && host_process "${cache_hosts}2"
+            fetch_blocklist "trackers"
+            for file in "$persist_dir/cache/trackers/hosts"*; do
+                [ -f "$file" ] && host_process "$file"
+            done
             stage_blocklist_files "trackers"
             install_hosts "trackers"
         fi
@@ -417,6 +460,7 @@ function block_trackers() {
             log_message "Fetching trackers block hosts for $brand"
             echo "[*] Fetching trackers block files for $brand"
             fetch "${cache_hosts}1" "https://raw.githubusercontent.com/r-a-y/mobile-hosts/refs/heads/master/AdguardTracking.txt"
+            fetch "${cache_hosts}2" "https://blocklistproject.github.io/Lists/tracking.txt"
             case "$brand" in
                 xiaomi|redmi|poco) url="https://raw.githubusercontent.com/hagezi/dns-blocklists/main/hosts/native.xiaomi.txt" ;;
                 samsung) url="https://raw.githubusercontent.com/hagezi/dns-blocklists/main/hosts/native.samsung.txt" ;;
@@ -426,7 +470,8 @@ function block_trackers() {
                 *) url="" ;;
             esac
             host_process "${cache_hosts}1"
-            [ -n "$url" ] && fetch "${cache_hosts}2" "$url" && host_process "${cache_hosts}2"
+            host_process "${cache_hosts}2"
+            [ -n "$url" ] && fetch "${cache_hosts}3" "$url" && host_process "${cache_hosts}3"
         fi
         log_message "Enabling trackers block"
         echo "[*] Enabling trackers block for $brand"
@@ -440,6 +485,48 @@ function block_trackers() {
     log_duration "block_trackers ($status)" "$start_time"
 }
 
+function fetch_blocklist() {
+    bl="$1"
+    cache_hosts="$persist_dir/cache/$bl/hosts"
+
+    case "$bl" in
+        porn)
+            fetch "${cache_hosts}1" "https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/porn-only/hosts"
+            fetch "${cache_hosts}2" "https://raw.githubusercontent.com/Sinfonietta/hostfiles/refs/heads/master/pornography-hosts"
+            fetch "${cache_hosts}3" "https://blocklistproject.github.io/Lists/porn.txt"
+            ;;
+        gambling)
+            fetch "${cache_hosts}1" "https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/gambling-only/hosts"
+            fetch "${cache_hosts}2" "https://blocklistproject.github.io/Lists/gambling.txt"
+            ;;
+        fakenews|social)
+            fetch "${cache_hosts}1" \
+                "https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/${bl}-only/hosts"
+            ;;
+        trackers)
+            fetch "${cache_hosts}1" "https://raw.githubusercontent.com/r-a-y/mobile-hosts/refs/heads/master/AdguardTracking.txt"
+            fetch "${cache_hosts}2" "https://blocklistproject.github.io/Lists/tracking.txt"
+
+            # Device-specific tracker hosts
+            brand=$(getprop ro.product.brand | tr '[:upper:]' '[:lower:]')
+            case "$brand" in
+                xiaomi|redmi|poco) url="https://raw.githubusercontent.com/hagezi/dns-blocklists/main/hosts/native.xiaomi.txt" ;;
+                samsung)           url="https://raw.githubusercontent.com/hagezi/dns-blocklists/main/hosts/native.samsung.txt" ;;
+                oppo|realme)       url="https://raw.githubusercontent.com/hagezi/dns-blocklists/main/hosts/native.oppo-realme.txt" ;;
+                vivo)              url="https://raw.githubusercontent.com/hagezi/dns-blocklists/main/hosts/native.vivo.txt" ;;
+                huawei)            url="https://raw.githubusercontent.com/hagezi/dns-blocklists/main/hosts/native.huawei.txt" ;;
+                *) url="" ;;
+            esac
+
+            [ -n "$url" ] && fetch "${cache_hosts}3" "$url"
+            ;;
+        safebrowsing)
+            fetch "${cache_hosts}1" "https://raw.githubusercontent.com/columndeeply/hosts/refs/heads/main/safebrowsing"
+            ;;
+    esac
+    wait
+}
+
 # shortcase
 function tolower() {
     echo "$1" | tr '[:upper:]' '[:lower:]'
@@ -448,7 +535,7 @@ function tolower() {
 # uhhhhh
 function abort() {
     log_message "Aborting: $1"
-    echo "[!] $1"
+    echo "[✗] $1"
     sleep 0.5
     exit 1
 }
@@ -463,10 +550,9 @@ function nuke_if_we_dont_have_internet() {
 # tmp_hosts 1-9 = This is the downloaded hosts, to simplify process of install and remove function.
 function fetch() {
     start_time=$(date +%s)
-    PATH=/data/adb/ap/bin:/data/adb/ksu/bin:/data/adb/magisk:/data/data/com.termux/files/usr/bin:$PATH
     local output_file="$1"
     local url="$2"
-
+    PATH=/data/adb/ap/bin:/data/adb/ksu/bin:/data/adb/magisk:/data/data/com.termux/files/usr/bin:$PATH
     # Curly hairyyy- *ahem*
     # So uhh, we check for curl existence, if it exists then we gotta use it to fetch hosts
     if command -v curl >/dev/null 2>&1; then
@@ -490,6 +576,7 @@ function fetch() {
 
 # Updates module status, modifying module description in module.prop
 function update_status() {
+    status_msg=""  # Reset status message
     log_message "Updating module status"
     start_time=$(date +%s)
     log_message "Fetching last hosts file update"
@@ -504,12 +591,10 @@ function update_status() {
     blocked_mod=$(cat "$persist_dir/counts/blocked_mod.count" 2>/dev/null)
 
     # Count blacklisted entries (excluding comments and empty lines)
-    blacklist_count=0
-    [ -s "$persist_dir/blacklist.txt" ] && blacklist_count=$(grep -c '^[^#[:space:]]' "$persist_dir/blacklist.txt")
+    [ -s "$persist_dir/blacklist.txt" ] && blacklist_count=$(grep -c '^[^#[:space:]]' "$persist_dir/blacklist.txt") || blacklist_count=0
 
     # Count whitelisted entries (excluding comments and empty lines)
-    whitelist_count=0
-    [ -f "$persist_dir/whitelist.txt" ] && whitelist_count=$(grep -c '^[^#[:space:]]' "$persist_dir/whitelist.txt")
+    [ -f "$persist_dir/whitelist.txt" ] && whitelist_count=$(grep -c '^[^#[:space:]]' "$persist_dir/whitelist.txt") || whitelist_count=0
     log_message "System hosts entries count: $blocked_sys"
     log_message "Module hosts entries count: $blocked_mod"
     log_message "Blacklist entries count: $blacklist_count"
@@ -520,6 +605,20 @@ function update_status() {
         mode="hosts mount mode: zn-hostsredirect"
     else
         mode="hosts mount mode: Standard mount"
+    fi
+
+    # Log enabled blocklists
+    enabled_blocklists=""
+    for bl in porn gambling fakenews social trackers safebrowsing; do
+        eval enabled=\$block_${bl}
+        if [ "$enabled" = "1" ]; then
+            enabled_blocklists="$enabled_blocklists $bl"
+        fi
+    done
+    if [ -n "$enabled_blocklists" ]; then
+        log_message INFO "Enabled blocklists:$enabled_blocklists"
+    else
+        log_message INFO "No blocklists enabled"
     fi
 
     # Here goes the part where we actually determine module status
@@ -548,10 +647,13 @@ function update_status() {
                 echo "[!!!] Critical Error Detected (Hosts Mount Failure). Please check your root manager settings and disable any conflicted module(s)."
                 echo "[!!!] Module hosts blocks $blocked_mod domains, System hosts blocks none."
             fi
-        else
+        fi
+        # Set success message if not set to error
+        if [ -z "$status_msg" ]; then
             status_msg="Status: Protection is enabled ✅ | Blocking $blocked_mod domains"
             [ "$blacklist_count" -gt 0 ] && status_msg="Status: Protection is enabled ✅ | Blocking $((blocked_mod - blacklist_count)) domains + $blacklist_count (blacklist)"
             [ "$whitelist_count" -gt 0 ] && status_msg="$status_msg | Whitelist: $whitelist_count"
+            [ -n "$enabled_blocklists" ] && status_msg="$status_msg | Enabled Blocklists:$enabled_blocklists"
             status_msg="$status_msg | Last updated: $last_mod | $mode"
         fi
     fi
@@ -570,24 +672,36 @@ function enable_cron() {
     JOB_FILE="$JOB_DIR/root"
     CRON_JOB="0 */12 * * * sh /data/adb/modules/Re-Malwack/rmlwk.sh --update-hosts && echo '[AUTO UPDATE TIME!!!]' >> /data/adb/Re-Malwack/logs/auto_update.log"
     PATH=/data/adb/ap/bin:/data/adb/ksu/bin:/data/adb/magisk:$PATH
-
-    if [ -d "$JOB_DIR" ]; then
+    if [ -d "$JOB_DIR" ] || [ -f "$FALLBACK_SCRIPT" ]; then
         echo "[i] Auto update is already enabled"
     else
         # Create directory and file if they don't exist
         mkdir -p "$JOB_DIR"
         touch "$JOB_FILE"
         echo "$CRON_JOB" >> "$JOB_FILE"
-        if ! busybox crontab "$JOB_FILE" -c "$JOB_DIR"; then
-            echo "[✗] Failed to enable auto update: cron-side error."
-            log_message ERROR "Failed to enable auto update: cron-side error."
+        if ! crontab "$JOB_FILE" -c "$JOB_DIR"; then
+            echo "[!] Failed to enable auto update with crond, falling back to loop-based update."
+            log_message WARN "Failed to enable auto update with crond, falling back to loop-based update."
+            # Create fallback script
+            cat > "$FALLBACK_SCRIPT" << 'EOF'
+#!/system/bin/sh
+while true; do
+    sleep 86400  # Sleep for 24 hours
+    sh /data/adb/modules/Re-Malwack/rmlwk.sh --update-hosts --quiet
+done
+EOF
+            chmod +x "$FALLBACK_SCRIPT"
+            # Start the fallback script in background
+            nohup "$FALLBACK_SCRIPT" > /dev/null 2>&1 &
+            log_message SUCCESS "Fallback auto-update script started."
+            echo "[✓] Auto-update enabled with fallback (24h loop)."
         else
-            log_message "Cron job added."
+            log_message SUCCESS "Cron job added."
             crond -c $JOB_DIR -L $persist_dir/logs/auto_update.log
-            sed -i 's/^daily_update=.*/daily_update=1/' "/data/adb/Re-Malwack/config.sh"
-            log_message SUCCESS "Auto-update has been enabled."
-            echo "[✓] Auto-update enabled."
+            echo "[✓] Auto-update enabled with crond."
         fi
+        sed -i 's/^daily_update=.*/daily_update=1/' "/data/adb/Re-Malwack/config.sh"
+        log_message SUCCESS "Auto-update has been enabled."
     fi
 }
 
@@ -600,14 +714,19 @@ function disable_cron() {
     log_message "Disabling auto update has been initiated."
     log_message "Killing cron processes"
     # Kill cron lore
-    busybox pkill crond > /dev/null 2>&1
-    busybox pkill busybox crond > /dev/null 2>&1
-    busybox pkill busybox crontab > /dev/null 2>&1
-    busybox pkill crontab > /dev/null 2>&1
+    pkill crond > /dev/null 2>&1
+    pkill crontab > /dev/null 2>&1
     log_message "Cron processes stopped."
 
+    # Kill fallback script if running
+    if [ -f "$FALLBACK_SCRIPT" ]; then
+        pkill -f "$FALLBACK_SCRIPT" > /dev/null 2>&1
+        rm -f "$FALLBACK_SCRIPT"
+        log_message "Fallback auto-update script stopped and removed."
+    fi
+
     # Check if cron job exists
-    if [ ! -d "$JOB_DIR" ]; then
+    if [ ! -d "$JOB_DIR" ] && [ ! -f "$FALLBACK_SCRIPT" ]; then
         echo "[i] Auto update is already disabled"
     else    
         rm -rf "$JOB_DIR"
@@ -622,8 +741,10 @@ function disable_cron() {
 
 # ===== Pre-main logic =====
 
-# 1 - Check if zygisk host redirect module is enabled
-zn_module_dir="/data/adb/modules/hostsredirect"
+# 1 - log module version
+log_message "Running Re-Malwack version $version"
+
+# 2 - Check if zygisk host redirect module is enabled
 if [ -d "$zn_module_dir" ] && [ ! -f "$zn_module_dir/disable" ]; then
     is_zn_detected=1
     hosts_file="/data/adb/hostsredirect/hosts"
@@ -633,24 +754,24 @@ else
     log_message "Using standard mount method with $MODDIR/system/etc/hosts"
 fi
 
-# 2 - Trigger force stats refresh on WebUI
+# 3 - Trigger force stats refresh on WebUI
 if [ "$WEBUI" = "true" ]; then
     refresh_blocked_counts
     update_status
 fi
-# 3 -Error logging lore
+# 4 -Error logging lore
 
-# 3.1 - Log errors
+# 4.1 - Log errors
 exec 2>>"$LOGFILE"
 
-# 3.2 - Trap runtime errors (logs failing command + exit code)
+# 4.2 - Trap runtime errors (logs failing command + exit code)
 trap '
 err_code=$?
 timestamp=$(date +"%Y-%m-%d %I:%M:%S %p")
 echo "[$timestamp] - [ERROR] - Command \"$BASH_COMMAND\" failed at line $LINENO (exit code: $err_code)" >> "$LOGFILE"
 ' ERR
 
-# 3.3 - Trap final script exit
+# 4.3 - Trap final script exit
 trap '
 exit_code=$?
 timestamp=$(date +"%Y-%m-%d %I:%M:%S %p")
@@ -670,7 +791,7 @@ esac
 [ $exit_code -ne 0 ] && echo "[$timestamp] - [ERROR] - $msg at line $LINENO (exit code: $exit_code)" >> "$LOGFILE"
 ' EXIT
 
-# 4- Check for --quiet argument
+# 5 - Check for --quiet argument
 for arg in "$@"; do
     if [ "$arg" = "--quiet" ]; then
         quiet_mode=1
@@ -678,11 +799,10 @@ for arg in "$@"; do
     fi
 done
 
-# 5 - Show banner if not running from Magisk Manager / quiet mode is disabled
+# 6 - Show banner if not running from Magisk Manager / quiet mode is disabled
 [ -z "$MAGISKTMP" ] && [ "$quiet_mode" = 0 ] && rmlwk_banner
 
-# 6 - Log Module Version
-log_message "Running Re-Malwack version $version"
+log_message INFO "========== End of pre-main logic =========="
 
 # ====== Main Logic ======
 case "$(tolower "$1")" in
@@ -718,7 +838,13 @@ case "$(tolower "$1")" in
 	    echo "[✓] Successfully reverted hosts."
         log_duration "reset" "$start_time"
         ;;
-    --block-porn|-bp|--block-gambling|-bg|--block-fakenews|-bf|--block-social|-bs|--block-trackers|-bt)
+    --query-domain|-q)
+        start_time=$(date +%s)
+        domain="$2"
+        query_domain "$domain"
+        log_duration "query-domain" "$start_time"
+        ;;
+    --block-porn|-bp|--block-gambling|-bg|--block-fakenews|-bf|--block-social|-bs|--block-trackers|-bt|--block-safebrowsing|-bsb)
             start_time=$(date +%s)
             is_protection_paused && abort "Ad-block is paused. Please resume before running this command."
     
@@ -728,6 +854,7 @@ case "$(tolower "$1")" in
                 --block-fakenews|-bf) block_type="fakenews" ;;
                 --block-social|-bs) block_type="social" ;;
                 --block-trackers|-bt) block_type="trackers" ;;
+                --block-safebrowsing|-bsb) block_type="safebrowsing" ;;
             esac
             status="$2"
             if [ "$block_type" = "trackers" ]; then
@@ -740,25 +867,25 @@ case "$(tolower "$1")" in
                     if [ "$block_toggle" = 0 ]; then
                         echo "[i] $block_type block is already disabled"
                     else
-                        log_message "Disabling ${block_type} has been initiated."
-                        echo "[*] Removing block entries for ${block_type} sites."
+                        log_message "Disabling ${block_type} blocklist has been initiated."
+                        echo "[*] Disabling ${block_type} blocklist has been initiated."
                         block_content "$block_type" 0
-                        log_message SUCCESS "Unblocked ${block_type} sites successfully."
-                        echo "[✓] Unblocked ${block_type} sites successfully."
+                        log_message SUCCESS "Disabled ${block_type} blocklist successfully."
+                        echo "[✓] Disabled ${block_type} blocklist successfully."
                     fi
                 else
                     if [ "$block_toggle" = 1 ]; then
                         echo "[!] ${block_type} block is already enabled"
                     else
-                        log_message "Enabling/Adding block entries for $block_type has been initiated."
-                        echo "[*] Adding block entries for ${block_type} sites."
+                        log_message "Enabling block entries for $block_type has been initiated."
+                        echo "[*] Enabling block entries for ${block_type} has been initiated."
                         block_content "$block_type" 1
-                        log_message SUCCESS "Blocked ${block_type} sites successfully."
-                        echo "[*] Blocked ${block_type} sites successfully."
+                        log_message SUCCESS "Enabled ${block_type} blocklist successfully."
+                        echo "[✓] Enabled ${block_type} blocklist successfully."
                     fi
                 fi
             fi
-    
+
             refresh_blocked_counts
             update_status
             log_duration "block-$block_type" "$start_time"
@@ -775,6 +902,10 @@ case "$(tolower "$1")" in
             echo "[i] Usage: rmlwk --whitelist|-w <add|remove> [domain2] [domain3] ..."
             echo "[i] Examples:"
             echo "  rmlwk -w add example.com           # Add domain to the whitelist"
+            echo "  rmlwk --whitelist add *.example.com # Add subdomain wildcard to whitelist"
+            echo "  rmlwk -w add *something            # Add suffix wildcard to whitelist"
+            echo "  rmlwk --whitelist add something*   # Add prefix wildcard to whitelist"
+            echo "  rmlwk --whitelist remove example.com # Remove domain from whitelist"
             echo "  rmlwk -w remove domain1.com domain2.com domain3.com # Remove multiple domains from whitelist"
             display_whitelist=$(cat "$persist_dir/whitelist.txt" 2>/dev/null)
             [ -n "$display_whitelist" ] && echo -e "Current whitelist:\n$display_whitelist" || echo "Current whitelist: no saved whitelist"
@@ -1184,6 +1315,21 @@ case "$(tolower "$1")" in
         fi
         ;;
 
+    --auto-update|-a)
+        case "$2" in
+            enable)
+                enable_cron
+                ;;
+            disable)
+                disable_cron
+                ;;
+            *)
+                echo "[!] Invalid option for --auto-update / -a"
+                echo "Usage: rmlwk <--auto-update|-a> <enable|disable>"
+                ;;
+        esac
+        ;;
+
     --update-hosts|-u)
         start_time=$(date +%s)
         sed '/#/d' $persist_dir/sources.txt | grep http > /dev/null || abort "No hosts sources were found, Aborting."
@@ -1201,7 +1347,7 @@ case "$(tolower "$1")" in
         combined_file="${tmp_hosts}_all"
         > "$combined_file"
 
-        # 1. Download + normalize base hosts
+        # 1 - Download base hosts from sources.txt
         echo "[*] Fetching base hosts..."
         hosts_list=$(grep -Ev '^#|^$' "$persist_dir/sources.txt" | sort -u)
         counter=0
@@ -1211,7 +1357,7 @@ case "$(tolower "$1")" in
         done
         wait
 
-        # Process in parallel
+        # 1.1 - Process in parallel
         job_limit=4
         job_count=0
         for i in $(seq 1 $counter); do
@@ -1224,66 +1370,39 @@ case "$(tolower "$1")" in
         done
         wait
 
-        # 3. Download & process blocklists (cached + enabled)
-        blocklists_to_install=""
-        for bl in porn gambling fakenews social; do
+        # 2 - Download & process blocklists
+        for bl in porn gambling fakenews social trackers safebrowsing; do
             block_var="block_${bl}"
             eval enabled=\$$block_var
-            cache_hosts="$persist_dir/cache/$bl/hosts"
 
-            # Download & process only if blocklist is enabled
-          if [ "$enabled" = "1" ]; then
-              mkdir -p "$persist_dir/cache/$bl"
-              echo "[*] Fetching blocklist: $bl"
-              log_message "Fetching blocklist: $bl"
-              fetch "${cache_hosts}1" "https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/${bl}-only/hosts"
-              if [ "$bl" = "porn" ]; then
-                  fetch "${cache_hosts}2" https://raw.githubusercontent.com/johnlouie09/Anti-Porn-HOSTS-File/refs/heads/master/HOSTS.txt &
-                  fetch "${cache_hosts}3" https://raw.githubusercontent.com/Sinfonietta/hostfiles/refs/heads/master/pornography-hosts &
-                  fetch "${cache_hosts}4" https://raw.githubusercontent.com/columndeeply/hosts/refs/heads/main/safebrowsing &
-                  wait
-              fi
-              # Process downloaded hosts
-              for file in "$persist_dir/cache/$bl/hosts"*; do
-                  [ -f "$file" ] && host_process "$file"
-              done
-          
-              # Append only if enabled
-              cat "$persist_dir/cache/$bl/hosts"* >> "$combined_file"
-              echo "[✓] Fetched $bl blocklist"
-              log_message "Added $bl blocklist to combined file"
-          fi
+            # 2.1 - Skip if not enabled
+            [ "$enabled" = "0" ] && continue
+
+            # 2.1 - Prepare blocklist fetch
+            echo "[*] Fetching blocklist: $bl"
+            log_message "Fetching blocklist: $bl"
+            mkdir -p "$persist_dir/cache/$bl"
+
+            # 2.3 - Fetch blocklists
+            fetch_blocklist "$bl"
+
+            # 2.4 - Process blocklists
+            for file in "$persist_dir/cache/$bl/hosts"*; do
+                [ -f "$file" ] && host_process "$file"
+            done
+
+            # 2.5 - Append to combined file
+            cat "$persist_dir/cache/$bl/hosts"* >> "$combined_file"
+            echo "[✓] Fetched $bl blocklist"
+            log_message "Added $bl hosts entries to combined hosts"
         done
-        # 3b. Handle trackers blocklist if enabled
-        if [ "$block_trackers" = "1" ]; then
-            echo "[*] Fetching trackers blocklist..."
-            log_message "Fetching trackers blocklist"
-            mkdir -p "$persist_dir/cache/trackers"
 
-            cache_hosts="$persist_dir/cache/trackers/hosts"
-            fetch "${cache_hosts}1" "https://raw.githubusercontent.com/r-a-y/mobile-hosts/refs/heads/master/AdguardTracking.txt"
-            brand=$(getprop ro.product.brand | tr '[:upper:]' '[:lower:]')
-            case "$brand" in
-                xiaomi|redmi|poco) url="https://raw.githubusercontent.com/hagezi/dns-blocklists/main/hosts/native.xiaomi.txt" ;;
-                samsung) url="https://raw.githubusercontent.com/hagezi/dns-blocklists/main/hosts/native.samsung.txt" ;;
-                oppo|realme) url="https://raw.githubusercontent.com/hagezi/dns-blocklists/main/hosts/native.oppo-realme.txt" ;;
-                vivo) url="https://raw.githubusercontent.com/hagezi/dns-blocklists/main/hosts/native.vivo.txt" ;;
-                huawei) url="https://raw.githubusercontent.com/hagezi/dns-blocklists/main/hosts/native.huawei.txt" ;;
-                *) echo "[i] Your device brand isn't supported, using general trackers blocklist only." && url="" ;;
-            esac
-
-            host_process "${cache_hosts}1"
-            [ -n "$url" ] && fetch "${cache_hosts}2" "$url" && host_process "${cache_hosts}2"
-
-            cat "$persist_dir/cache/trackers/hosts"* >> "$combined_file"
-            echo "[✓] Fetched trackers blocklist"
-            log_message "Added trackers blocklist to combined file"
-        fi
+        # 3 - Install hosts
         echo "[*] Installing hosts"
         printf "127.0.0.1 localhost\n::1 localhost" > "$hosts_file"
         install_hosts "all"
 
-        # 4. Done
+        # 4 - Done
         refresh_blocked_counts
         update_status
         log_message SUCCESS "Successfully updated all hosts."
@@ -1297,15 +1416,16 @@ case "$(tolower "$1")" in
         echo "--update-hosts, -u: Update the hosts file."
         echo "--auto-update, -a <enable|disable>: Toggle auto hosts update."
         echo "--custom-source, -c <add|remove> <domain1> [domain2] ...: Add/remove custom hosts sources."
-        echo "--reset, -r: Restore original hosts file."
-        echo "--adblock-switch, -as: Toggle protections on/off"
+        echo "--reset, -r: Reset hosts file to default."
+        echo "--query-domain, -q <domain>: Query if a domain is blocked, redirected, or not blocked."
+        echo "--adblock-switch, -as: Toggle protections on/off."
         echo "--block-trackers, -bt <disable>, block trackers, use disable to unblock."
         echo "--block-porn, -bp <disable>: Block pornographic sites, use disable to unblock."
         echo "--block-gambling, -bg <disable>: Block gambling sites, use disable to unblock."
         echo "--block-fakenews, -bf <disable>: Block fake news sites, use disable to unblock."
         echo "--block-social, -bs <disable>: Block social media sites, use disable to unblock."
-        echo "--whitelist, -w <add|remove> <domain|pattern> [IP] [domain2] ...: Whitelist domain(s) with optional IP."
-        echo "--blacklist, -b <add|remove> <domain1> [domain2] ...: Blacklist domain(s)."
+        echo "--whitelist, -w <add|remove> <domain|pattern> <domain2> ...: Whitelist domain(s), only whitelist one domain at a time, otherwise use wildcard or use multiple domains in case of unwhitelisting."
+        echo "--blacklist, -b <add|remove> <domain1> <domain2> ...: Blacklist domain(s)."
         echo "--help, -h: Display help."
         echo -e "\033[0;31m Example command: su -c rmlwk --update-hosts\033[0m"
         ;;
