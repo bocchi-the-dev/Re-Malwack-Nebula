@@ -161,14 +161,21 @@ body.input-focused {
 }
 
 .festival {
-    display: block;
-    position: absolute;
+    display: none;
+    position: fixed;
+    left: 0;
     top: 0;
+    width: 100%;
+    z-index: -1;
 }
 
 .festival img {
     width: 100%;
     height: auto;
+}
+
+.festival.show {
+    display: block;
 }
 
 .about {
@@ -332,7 +339,9 @@ body.input-focused {
     align-items: center;
     height: 80px;
     width: 80px;
+    padding: 12px;
     border-radius: 15px;
+    box-sizing: border-box;
     background-color: var(--logo-bg);
 
     svg {
@@ -460,7 +469,6 @@ body.input-focused {
     box-shadow: 0px 2px 4px rgba(0, 0, 0, 0.1);
     padding: 15px;
     box-sizing: border-box;
-    transition: background-color 0.2s ease;
     user-select: none;
 }
 
@@ -684,6 +692,15 @@ input:checked+.slider:before {
     100% {
         transform: rotate(360deg);
     }
+}
+
+.loading-spinner {
+    height: 50px;
+    width: 50px;
+    border-radius: 50%;
+    border: 5px solid var(--border-color);
+    border-top-color: var(--btn-primary);
+    animation: spin 1s linear infinite;
 }
 
 .checkbox-wrapper {

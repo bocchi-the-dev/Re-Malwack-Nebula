@@ -15,14 +15,19 @@
         "description": "Fixing bugs + Contributor"
     },
     {
-        "username": "ayumi-aiko",
+        "username": "bocchi-the-dev",
         "type": "Contributor",
         "description": "Contributor"
     },
     {
         "username": "myst-25",
         "type": "Contributor",
-        "description": "Active tester"
+        "description": "Testing and feedback"
+    },
+    {
+        "username": "dnascorpionofficial",
+        "type": "Contributor",
+        "description": "Testing and feedback"
     },
     {
         "username": "person0z",
@@ -58,5 +63,10 @@
         "username": "r-a-y",
         "type": "Hosts Provider",
         "description": "AdGuard Tracking blocklist"
+    },
+    {
+        "username": "blocklistproject",
+        "type": "Hosts Provider",
+        "description": "Hosts provider"
     }
 ]
