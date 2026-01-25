@@ -43,6 +43,10 @@ thingsToVerifyChangesFromOrigin=(
     "post-fs-data.sh"
     "service.sh"
 )
+thingsToMergeFromOrigin=(
+    "whitelist.txt"
+    "social_whitelist.txt"
+)
 # gbl vars:
 
 # functions:
@@ -64,6 +68,17 @@ function downloadContentFromWEB() {
     fi
 }
 # functions:
+
+# out source stuff:
+for k in "${thingsToMergeFromOrigin}"; do
+    downloadContentFromWEB "${baseModuleURL}/${k}" "${k}"_
+    if git --no-pager diff --ignore-cr-at-eol -w --no-index "${k}" "${k}"_ &>/dev/null; then
+        echo "[!] - ${k} differs from base and it will get merged..."
+        cp "${k}"_ "${k}"
+        git add "${k}"
+        ((changes += 1))
+    fi
+done
 
 # main:
 mkdir -p {newExtendedModuleTemplateAdaptation,module}/originVerify
